@@ -1,0 +1,131 @@
+{
+  "title": "Town Hollywood B1.1 Furnishing Plan",
+  "measurements": [
+    { "label": "Great Room sofa wall", "room": "Living", "value": 168, "unit": "in", "confidence": "med", "notes": "longest clear wall" },
+    { "label": "Sofa-to-TV distance", "room": "Living", "value": 132, "unit": "in", "confidence": "med" },
+    { "label": "Dining zone width", "room": "Dining", "value": 96, "unit": "in" },
+    { "label": "Dining zone depth", "room": "Dining", "value": 72, "unit": "in" },
+    { "label": "Master bed wall", "room": "Master", "value": 144, "unit": "in" },
+    { "label": "Master wall to wall depth", "room": "Master", "value": 128, "unit": "in" },
+    { "label": "Master dresser wall", "room": "Master", "value": 90, "unit": "in" },
+    { "label": "Bedroom2 bed/desk wall", "room": "Bedroom2", "value": 120, "unit": "in" },
+    { "label": "Bedroom2 width", "room": "Bedroom2", "value": 110, "unit": "in" },
+    { "label": "Balcony length", "room": "Balcony", "value": 220, "unit": "in" },
+    { "label": "Balcony depth", "room": "Balcony", "value": 120, "unit": "in" }
+  ],
+  "items": [
+    {
+      "title": "Sofa",
+      "room": "Living",
+      "priority": 1,
+      "status": "Shortlist",
+      "category": "Sofa",
+      "specs": { "type": "Sofa", "length_in": 92, "depth_in": 39, "fabric": "Performance fabric", "color": "Neutral" },
+      "notes": "Target 90-95 in length. Keep walkway clear to dining zone.",
+      "link": "https://www.article.com"
+    },
+    {
+      "title": "TV console",
+      "room": "Living",
+      "priority": 2,
+      "status": "Idea",
+      "category": "TV Console",
+      "specs": { "width_in": 72, "depth_in": 18, "style": "Wood / closed storage" },
+      "notes": "60-72 in wide, 15-18 in deep"
+    },
+    {
+      "title": "Dining table",
+      "room": "Dining",
+      "priority": 2,
+      "status": "Idea",
+      "category": "Dining Table",
+      "specs": { "shape": "Rect", "length_in": 60, "width_in": 36, "seats": 4 },
+      "notes": "Round 42-48 in or 60x36 in"
+    },
+    {
+      "title": "Coffee table",
+      "room": "Living",
+      "priority": 3,
+      "status": "Idea",
+      "category": "Coffee Table",
+      "specs": { "shape": "Round", "diameter_in": 36, "height_in": 16, "material": "Wood/stone" }
+    },
+    {
+      "title": "Bed - Master",
+      "room": "Master",
+      "priority": 1,
+      "status": "Selected",
+      "category": "Bed",
+      "specs": { "size": "Queen", "type": "Platform", "headboard": "Optional", "finish": "Wood" },
+      "notes": "Queen for clearance (24-30 in each side target)."
+    },
+    {
+      "title": "Dresser",
+      "room": "Master",
+      "priority": 2,
+      "status": "Idea",
+      "category": "Dresser",
+      "specs": { "width_in": 60, "depth_in": 18, "drawers": 6 }
+    },
+    {
+      "title": "Desk / Daybed",
+      "room": "Bedroom2",
+      "priority": 2,
+      "status": "Idea",
+      "category": "Other",
+      "specs": { "use": "Office/guest combo", "desk_width_in": 55, "bed_type": "Daybed or Murphy" },
+      "notes": "Decide guest vs office; keep closet clearance."
+    },
+    {
+      "title": "Balcony set",
+      "room": "Balcony",
+      "priority": 3,
+      "status": "Idea",
+      "category": "Balcony Set",
+      "specs": { "type": "Lounge", "material": "Outdoor-safe" },
+      "notes": "Lounge chairs + small table"
+    }
+  ],
+  "options": [
+    {
+      "title": "Sofa - Article Solae",
+      "parentTitle": "Sofa",
+      "store": "Article",
+      "link": "https://www.article.com/product/sofa",
+      "price": 1999,
+      "shipping": 99,
+      "tax": 180,
+      "discount": 0,
+      "dimensions": "90x39x34 in",
+      "notes": "Check seat depth + fabric. Verify delivery window."
+    },
+    {
+      "title": "Sofa - CB2 Range 2pc",
+      "parentTitle": "Sofa",
+      "store": "CB2",
+      "link": "https://www.cb2.com",
+      "price": 2899,
+      "shipping": 199,
+      "tax": 260,
+      "discount": 150,
+      "promo": "WELCOME15",
+      "dimensions": "92x64x32 in",
+      "notes": "Sectional layout - confirm chaise side works for plan."
+    },
+    {
+      "title": "Dining table - West Elm 60x36",
+      "parentTitle": "Dining table",
+      "store": "West Elm",
+      "price": 899,
+      "shipping": 149,
+      "tax": 90,
+      "discount": 0,
+      "dimensions": "60x36x30 in",
+      "notes": "Confirm seating and walkway clearance."
+    }
+  ],
+  "notes": [
+    { "title": "Town Hollywood context", "room": "Living", "notes": "#furniture #Town ; layout B1.1 2 bed/2 bath, interior 1,094 sq ft, balcony 243 sq ft. Measure walls to confirm fits." }
+  ]
+}
+

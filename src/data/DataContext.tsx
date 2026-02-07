@@ -1,0 +1,1183 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import type { Actor, ExportBundleV1, ExportBundleV2, Item, Measurement, Option, PlannerAttachmentV1, Provenance, Room, RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, ROOMS } from "@/lib/domain";
+import { nowMs, parseNumberOrNull } from "@/lib/format";
+import { diffItem, diffMeasurement, diffOption } from "@/lib/diff";
+import { newId } from "@/lib/id";
+import { sanitizeProvenance } from "@/lib/provenance";
+import { DEFAULT_HOME, makeDefaultRooms } from "@/data/seed";
+import {
+  idbBulkPut,
+  idbGetAll,
+  idbGetSnapshot,
+  idbPut,
+  idbResetAll,
+  idbSetMeta,
+} from "@/storage/idb";
+import { notifyDbChanged, subscribeDbChanges } from "@/storage/notify";
+import { getTownHollywoodExampleBundle } from "@/examples/town-hollywood";
+
+type HomeMeta = NonNullable<ExportBundleV1["home"]>;
+
+type PlannerMeta = PlannerAttachmentV1 | null;
+
+type DataContextValue = {
+  ready: boolean;
+  home: HomeMeta;
+  planner: PlannerMeta;
+  rooms: Room[];
+  measurements: Measurement[];
+  items: Item[];
+  options: Option[];
+
+  saveHome: (home: HomeMeta) => Promise<void>;
+  savePlanner: (planner: PlannerMeta) => Promise<void>;
+
+  reorderRooms: (orderedRoomIds: RoomId[]) => Promise<void>;
+  reorderItems: (roomId: RoomId, orderedItemIds: string[]) => Promise<void>;
+  reorderMeasurements: (roomId: RoomId, orderedMeasurementIds: string[]) => Promise<void>;
+  reorderOptions: (itemId: string, orderedOptionIds: string[]) => Promise<void>;
+  renameCategory: (oldName: string, newName: string) => Promise<void>;
+
+  createItem: (partial: Partial<Item>) => Promise<string>;
+  updateItem: (id: string, patch: Partial<Item>) => Promise<void>;
+  deleteItem: (id: string) => Promise<void>;
+
+  createOption: (partial: Partial<Option> & { itemId: string }) => Promise<string>;
+  updateOption: (id: string, patch: Partial<Option>) => Promise<void>;
+  deleteOption: (id: string) => Promise<void>;
+
+  createMeasurement: (partial: Partial<Measurement> & { room: RoomId }) => Promise<string>;
+  updateMeasurement: (id: string, patch: Partial<Measurement>) => Promise<void>;
+  deleteMeasurement: (id: string) => Promise<void>;
+
+  updateRoom: (id: RoomId, patch: Partial<Room>) => Promise<void>;
+
+  exportBundle: (opts?: { includeDeleted?: boolean }) => Promise<ExportBundleV2>;
+  importBundle: (bundle: unknown, opts?: { mode?: "merge" | "replace"; aiAssisted?: boolean }) => Promise<void>;
+  resetLocal: () => Promise<void>;
+  loadExampleTownHollywood: (mode?: "merge" | "replace") => Promise<void>;
+};
+
+const DataContext = createContext<DataContextValue | null>(null);
+
+function sanitizeHomeMeta(input: unknown): HomeMeta {
+  const base = { ...DEFAULT_HOME };
+  if (!input || typeof input !== "object") return base;
+  const obj = input as Record<string, unknown>;
+  if (typeof obj.name === "string" && obj.name.trim()) base.name = obj.name.trim();
+  if (Array.isArray(obj.tags)) base.tags = obj.tags.map(String).filter(Boolean);
+  if (typeof obj.description === "string") base.description = obj.description;
+  return base;
+}
+
+function sanitizePlannerMeta(input: unknown): PlannerMeta {
+  if (!input || typeof input !== "object") return null;
+  const obj = input as Record<string, unknown>;
+  const version = obj.version === 1 ? 1 : null;
+  const mergedAt = typeof obj.mergedAt === "string" && obj.mergedAt.trim() ? obj.mergedAt : new Date().toISOString();
+  const template = obj.template ?? null;
+  if (version !== 1) {
+    // If a raw planner JSON was stored directly, wrap it.
+    return { version: 1, mergedAt, template: input };
+  }
+  return { version: 1, mergedAt, template };
+}
+
+function normalizeRoomId(raw: unknown): RoomId | null {
+  const t = String(raw || "").trim();
+  return (ROOMS as readonly string[]).includes(t) ? (t as RoomId) : null;
+}
+
+function normalizeStatus(raw: unknown): Item["status"] {
+  const t = String(raw || "").trim();
+  return (ITEM_STATUSES as readonly string[]).includes(t) ? (t as Item["status"]) : "Idea";
+}
+
+function coerceNumberOrNull(input: unknown): number | null {
+  if (typeof input === "number") return Number.isFinite(input) ? input : null;
+  if (typeof input === "string") return parseNumberOrNull(input);
+  return null;
+}
+
+function coerceDims(input: unknown): Item["dimensions"] {
+  if (!input || typeof input !== "object") return undefined;
+  const obj = input as Record<string, unknown>;
+  const out: NonNullable<Item["dimensions"]> = {};
+  const wIn = coerceNumberOrNull(obj.wIn);
+  const hIn = coerceNumberOrNull(obj.hIn);
+  const dIn = coerceNumberOrNull(obj.dIn);
+  if (wIn !== null) out.wIn = wIn;
+  if (hIn !== null) out.hIn = hIn;
+  if (dIn !== null) out.dIn = dIn;
+  return Object.keys(out).length ? out : undefined;
+}
+
+function coerceSort(input: unknown): number | null | undefined {
+  const n = coerceNumberOrNull(input);
+  return n === null ? undefined : n;
+}
+
+function coerceSpecs(input: unknown): Item["specs"] {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const obj = input as Record<string, unknown>;
+  const out: NonNullable<Item["specs"]> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const key = String(k).trim();
+    if (!key) continue;
+    if (v === null) out[key] = null;
+    else if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") out[key] = v;
+    else if (typeof v === "undefined") continue;
+    else out[key] = JSON.stringify(v);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+function dimsFromLegacySpecs(specs: Item["specs"]): Item["dimensions"] | undefined {
+  if (!specs || typeof specs !== "object") return undefined;
+  const anySpecs = specs as Record<string, unknown>;
+  function num(key: string): number | null {
+    const v = anySpecs[key];
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    if (typeof v === "string") {
+      const n = Number.parseFloat(v);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  }
+  const wIn = num("width_in") ?? num("length_in");
+  const dIn = num("depth_in");
+  const hIn = num("height_in");
+  if (wIn === null && dIn === null && hIn === null) return undefined;
+  return { wIn, dIn, hIn };
+}
+
+function normalizeActor(input: unknown): Actor {
+  const t = String(input ?? "").trim();
+  return t === "human" || t === "ai" || t === "import" || t === "system" ? (t as Actor) : null;
+}
+
+function sanitizeExportMeta(input: unknown): ExportBundleV1["exportMeta"] | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const obj = input as Record<string, unknown>;
+  const exportedAt = coerceNumberOrNull(obj.exportedAt);
+  if (exportedAt === null) return undefined;
+  const exportedBy = normalizeActor(obj.exportedBy);
+  const schemaVersionRaw = coerceNumberOrNull(obj.schemaVersion);
+  const schemaVersion = schemaVersionRaw === null ? 1 : Math.max(1, Math.round(schemaVersionRaw));
+  const appVersion = typeof obj.appVersion === "string" && obj.appVersion.trim() ? obj.appVersion.trim() : undefined;
+  const sessionId = typeof obj.sessionId === "string" && obj.sessionId.trim() ? obj.sessionId.trim() : undefined;
+  return { exportedAt, exportedBy, appVersion, schemaVersion, sessionId };
+}
+
+function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+
+  // Bundle export format (v1/v2)
+  if ((obj.version === 1 || obj.version === 2) && Array.isArray(obj.items) && Array.isArray(obj.rooms)) {
+    const version = obj.version === 2 ? 2 : 1;
+    const home = sanitizeHomeMeta(obj.home);
+    const planner = sanitizePlannerMeta(obj.planner);
+    const exportedAt = typeof obj.exportedAt === "string" ? obj.exportedAt : new Date().toISOString();
+    const exportMeta = sanitizeExportMeta(obj.exportMeta);
+    const importedRooms: Room[] = (obj.rooms as unknown[]).map((r) => {
+      const rid = normalizeRoomId((r as any)?.id) ?? "Living";
+      const createdAt = coerceNumberOrNull((r as any)?.createdAt) ?? nowMs();
+      const updatedAt = coerceNumberOrNull((r as any)?.updatedAt) ?? createdAt;
+      return {
+        id: rid,
+        notes: typeof (r as any)?.notes === "string" ? (r as any).notes : "",
+        sort: coerceSort((r as any)?.sort),
+        createdAt,
+        updatedAt,
+        remoteId: typeof (r as any)?.remoteId === "string" ? (r as any).remoteId : undefined,
+        syncState: typeof (r as any)?.syncState === "string" ? (r as any).syncState : undefined,
+        provenance: sanitizeProvenance((r as any)?.provenance),
+      };
+    });
+
+    // Ensure all known rooms exist (older exports might omit rooms with no data).
+    const roomById = new Map<RoomId, Room>();
+    for (const r of importedRooms) roomById.set(r.id, r);
+    const rooms: Room[] = ROOMS.map((rid, idx) => {
+      const r = roomById.get(rid);
+      if (!r) {
+        const t = nowMs();
+        return { id: rid, notes: "", sort: idx, createdAt: t, updatedAt: t };
+      }
+      if (typeof r.sort !== "number") r.sort = idx;
+      return r;
+    });
+
+    const measurements: Measurement[] = Array.isArray(obj.measurements)
+      ? (obj.measurements as unknown[]).map((m) => {
+          const mid = typeof (m as any)?.id === "string" ? (m as any).id : newId("m");
+          const room = normalizeRoomId((m as any)?.room) ?? "Living";
+          const valueIn = coerceNumberOrNull((m as any)?.valueIn) ?? 0;
+          const createdAt = coerceNumberOrNull((m as any)?.createdAt) ?? nowMs();
+          const updatedAt = coerceNumberOrNull((m as any)?.updatedAt) ?? createdAt;
+          const confidence = ["low", "med", "high"].includes(String((m as any)?.confidence))
+            ? (String((m as any).confidence) as Measurement["confidence"])
+            : null;
+          return {
+            id: mid,
+            room,
+            label: String((m as any)?.label || "").trim() || "Measurement",
+            valueIn,
+            sort: coerceSort((m as any)?.sort),
+            confidence,
+            forCategory: typeof (m as any)?.forCategory === "string" ? (m as any).forCategory : null,
+            forItemId: typeof (m as any)?.forItemId === "string" ? (m as any).forItemId : null,
+            notes: typeof (m as any)?.notes === "string" ? (m as any).notes : null,
+            createdAt,
+            updatedAt,
+            remoteId: typeof (m as any)?.remoteId === "string" ? (m as any).remoteId : undefined,
+            syncState: typeof (m as any)?.syncState === "string" ? (m as any).syncState : undefined,
+            provenance: sanitizeProvenance((m as any)?.provenance),
+          };
+        })
+      : [];
+
+    const items: Item[] = (obj.items as unknown[]).map((it) => {
+      const iid = typeof (it as any)?.id === "string" ? (it as any).id : newId("i");
+      const room = normalizeRoomId((it as any)?.room) ?? "Living";
+      const createdAt = coerceNumberOrNull((it as any)?.createdAt) ?? nowMs();
+      const updatedAt = coerceNumberOrNull((it as any)?.updatedAt) ?? createdAt;
+      const qtyRaw = coerceNumberOrNull((it as any)?.qty);
+      return {
+        id: iid,
+        name: String((it as any)?.name || "").trim() || "Item",
+        room,
+        category: String((it as any)?.category || "Other").trim() || "Other",
+        status: normalizeStatus((it as any)?.status),
+        sort: coerceSort((it as any)?.sort),
+        price: coerceNumberOrNull((it as any)?.price),
+        qty: qtyRaw !== null && qtyRaw > 0 ? Math.round(qtyRaw) : 1,
+        store: typeof (it as any)?.store === "string" ? (it as any).store : null,
+        link: typeof (it as any)?.link === "string" ? (it as any).link : null,
+        notes: typeof (it as any)?.notes === "string" ? (it as any).notes : null,
+        priority: coerceNumberOrNull((it as any)?.priority),
+        dimensions: coerceDims((it as any)?.dimensions),
+        specs: coerceSpecs((it as any)?.specs),
+        createdAt,
+        updatedAt,
+        remoteId: typeof (it as any)?.remoteId === "string" ? (it as any).remoteId : undefined,
+        syncState: typeof (it as any)?.syncState === "string" ? (it as any).syncState : undefined,
+        provenance: sanitizeProvenance((it as any)?.provenance),
+      };
+    });
+
+    const options: Option[] = Array.isArray(obj.options)
+      ? (obj.options as unknown[]).map((op) => {
+          const oid = typeof (op as any)?.id === "string" ? (op as any).id : newId("o");
+          const createdAt = coerceNumberOrNull((op as any)?.createdAt) ?? nowMs();
+          const updatedAt = coerceNumberOrNull((op as any)?.updatedAt) ?? createdAt;
+          return {
+            id: oid,
+            itemId: String((op as any)?.itemId || "").trim(),
+            title: String((op as any)?.title || "").trim() || "Option",
+            sort: coerceSort((op as any)?.sort),
+            store: typeof (op as any)?.store === "string" ? (op as any).store : null,
+            link: typeof (op as any)?.link === "string" ? (op as any).link : null,
+            promoCode: typeof (op as any)?.promoCode === "string" ? (op as any).promoCode : null,
+            price: coerceNumberOrNull((op as any)?.price),
+            shipping: coerceNumberOrNull((op as any)?.shipping),
+            taxEstimate: coerceNumberOrNull((op as any)?.taxEstimate),
+            discount: coerceNumberOrNull((op as any)?.discount),
+            dimensionsText: typeof (op as any)?.dimensionsText === "string" ? (op as any).dimensionsText : null,
+            notes: typeof (op as any)?.notes === "string" ? (op as any).notes : null,
+            selected: Boolean((op as any)?.selected),
+            createdAt,
+            updatedAt,
+            remoteId: typeof (op as any)?.remoteId === "string" ? (op as any).remoteId : undefined,
+            syncState: typeof (op as any)?.syncState === "string" ? (op as any).syncState : undefined,
+            provenance: sanitizeProvenance((op as any)?.provenance),
+          };
+        })
+      : [];
+
+    if (version === 2) {
+      const meta: ExportBundleV2["exportMeta"] = {
+        exportedAt: exportMeta?.exportedAt ?? nowMs(),
+        exportedBy: exportMeta?.exportedBy ?? "import",
+        appVersion: exportMeta?.appVersion,
+        schemaVersion: 2,
+        sessionId: exportMeta?.sessionId,
+      };
+      return { version: 2, exportedAt, exportMeta: meta, home, planner, rooms, measurements, items, options };
+    }
+
+    return { version: 1, exportedAt, exportMeta, home, planner, rooms, measurements, items, options };
+  }
+
+  // Legacy single-file tracker import format (Town Hollywood JSON seed)
+  if (typeof obj.title === "string" && (Array.isArray(obj.items) || Array.isArray(obj.measurements))) {
+    const ts = nowMs();
+    const home = sanitizeHomeMeta({
+      name: DEFAULT_HOME.name,
+      tags: DEFAULT_HOME.tags,
+      description: `${obj.title}\n\n${DEFAULT_HOME.description}`,
+    });
+
+    // Ensure all rooms exist
+    const rooms = makeDefaultRooms().map((r) => ({ ...r, syncState: undefined }));
+
+    const nextSortByRoom: Record<RoomId, number> = ROOMS.reduce(
+      (acc, rid) => {
+        acc[rid] = 0;
+        return acc;
+      },
+      {} as Record<RoomId, number>,
+    );
+
+    const items: Item[] = (obj.items as unknown[] | undefined || []).map((it) => {
+      const room = normalizeRoomId((it as any)?.room) ?? "Living";
+      const specs = coerceSpecs((it as any)?.specs);
+      return {
+        id: newId("i"),
+        name: String((it as any)?.title || "").trim() || "Item",
+        room,
+        category: String((it as any)?.category || "Other").trim() || "Other",
+        status: normalizeStatus((it as any)?.status),
+        sort: nextSortByRoom[room]++,
+        price: typeof (it as any)?.price === "number" ? (it as any).price : null,
+        qty: typeof (it as any)?.quantity === "number" ? Math.round((it as any).quantity) : 1,
+        store: typeof (it as any)?.store === "string" ? (it as any).store : null,
+        link: typeof (it as any)?.link === "string" ? (it as any).link : null,
+        notes: typeof (it as any)?.notes === "string" ? (it as any).notes : null,
+        priority: typeof (it as any)?.priority === "number" ? (it as any).priority : null,
+        dimensions: dimsFromLegacySpecs(specs),
+        specs,
+        createdAt: ts,
+        updatedAt: ts,
+      };
+    });
+
+    const byName = new Map(items.map((i) => [i.name.toLowerCase(), i.id]));
+
+    const nextSortByItemId: Record<string, number> = {};
+
+    const options: Option[] = (obj.options as unknown[] | undefined || [])
+      .map((op) => {
+        const parentTitle = String((op as any)?.parentTitle || "").trim().toLowerCase();
+        const itemId = byName.get(parentTitle);
+        if (!itemId) return null;
+        const sort = typeof nextSortByItemId[itemId] === "number" ? nextSortByItemId[itemId] : 0;
+        nextSortByItemId[itemId] = sort + 1;
+        return {
+          id: newId("o"),
+          itemId,
+          title: String((op as any)?.title || "").trim() || "Option",
+          sort,
+          store: typeof (op as any)?.store === "string" ? (op as any).store : null,
+          link: typeof (op as any)?.link === "string" ? (op as any).link : null,
+          promoCode: typeof (op as any)?.promo === "string" ? (op as any).promo : null,
+          price: typeof (op as any)?.price === "number" ? (op as any).price : null,
+          shipping: typeof (op as any)?.shipping === "number" ? (op as any).shipping : null,
+          taxEstimate: typeof (op as any)?.tax === "number" ? (op as any).tax : null,
+          discount: typeof (op as any)?.discount === "number" ? (op as any).discount : null,
+          dimensionsText: typeof (op as any)?.dimensions === "string" ? (op as any).dimensions : null,
+          notes: typeof (op as any)?.notes === "string" ? (op as any).notes : null,
+          selected: false,
+          createdAt: ts,
+          updatedAt: ts,
+        } satisfies Option;
+      })
+      .filter(Boolean) as Option[];
+
+    const nextMeasSortByRoom: Record<RoomId, number> = ROOMS.reduce(
+      (acc, rid) => {
+        acc[rid] = 0;
+        return acc;
+      },
+      {} as Record<RoomId, number>,
+    );
+
+    const measurements: Measurement[] = (obj.measurements as unknown[] | undefined || []).map((m) => {
+      const room = normalizeRoomId((m as any)?.room) ?? "Living";
+      const unit = String((m as any)?.unit || "in").trim().toLowerCase();
+      const rawValue = typeof (m as any)?.value === "number" ? (m as any).value : 0;
+      const valueIn = unit === "cm" ? rawValue / 2.54 : rawValue;
+      const confidence = ["low", "med", "high"].includes(String((m as any)?.confidence))
+        ? (String((m as any).confidence) as Measurement["confidence"])
+        : undefined;
+      return {
+        id: newId("m"),
+        room,
+        label: String((m as any)?.label || "").trim() || "Measurement",
+        valueIn,
+        sort: nextMeasSortByRoom[room]++,
+        confidence,
+        forCategory: null,
+        forItemId: null,
+        notes: typeof (m as any)?.notes === "string" ? (m as any).notes : null,
+        createdAt: ts,
+        updatedAt: ts,
+      };
+    });
+
+    // Room notes (legacy "notes" array)
+    const notesArr = Array.isArray(obj.notes) ? (obj.notes as any[]) : [];
+    for (const n of notesArr) {
+      const rid = normalizeRoomId(n?.room);
+      if (!rid) continue;
+      const r = rooms.find((x) => x.id === rid);
+      if (!r) continue;
+      if (typeof n?.notes === "string") r.notes = n.notes;
+    }
+
+    return {
+      version: 1,
+      exportedAt: new Date(ts).toISOString(),
+      home,
+      rooms,
+      measurements,
+      items,
+      options,
+    };
+  }
+
+  return null;
+}
+
+function makeHumanCreatedProvenance(input: Provenance | undefined, at: number): Provenance {
+  const base = sanitizeProvenance(input) ?? {};
+  const next: Provenance = {
+    ...base,
+    createdBy: base.createdBy ?? "human",
+    createdAt: base.createdAt ?? at,
+    lastEditedBy: "human",
+    lastEditedAt: at,
+    modifiedFields: null,
+  };
+  if (next.reviewStatus === "verified") {
+    next.verifiedAt = typeof next.verifiedAt === "number" ? next.verifiedAt : at;
+    next.verifiedBy = next.verifiedBy ?? "human";
+    next.modifiedFields = null;
+  }
+  return next;
+}
+
+function touchProvenanceForHumanEdit(existing: Provenance | undefined, patch: Provenance | undefined, at: number): Provenance {
+  const base = sanitizeProvenance(existing) ?? {};
+  const delta = sanitizeProvenance(patch) ?? {};
+  const next: Provenance = {
+    ...base,
+    ...delta,
+    lastEditedBy: "human",
+    lastEditedAt: at,
+  };
+  if (next.reviewStatus === "verified") {
+    next.verifiedAt = typeof next.verifiedAt === "number" ? next.verifiedAt : at;
+    next.verifiedBy = next.verifiedBy ?? "human";
+    next.modifiedFields = null;
+  }
+  return next;
+}
+
+export function DataProvider({ children }: { children: React.ReactNode }) {
+  const [ready, setReady] = useState(false);
+  const [home, setHome] = useState<HomeMeta>(DEFAULT_HOME);
+  const [planner, setPlanner] = useState<PlannerMeta>(null);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [options, setOptions] = useState<Option[]>([]);
+
+  const saveHome = useCallback(async (next: HomeMeta) => {
+    const sanitized = sanitizeHomeMeta(next);
+    await idbSetMeta("home", sanitized);
+    setHome(sanitized);
+    notifyDbChanged();
+  }, []);
+
+  const savePlanner = useCallback(async (next: PlannerMeta) => {
+    const sanitized = sanitizePlannerMeta(next);
+    await idbSetMeta("planner", sanitized);
+    setPlanner(sanitized);
+    notifyDbChanged();
+  }, []);
+
+  const reloadAll = useCallback(async () => {
+    const snap = await idbGetSnapshot();
+    let nextRooms = snap.rooms;
+
+    if (!nextRooms.length) {
+      nextRooms = makeDefaultRooms();
+      await idbBulkPut("rooms", nextRooms);
+    }
+
+    const homeMeta = sanitizeHomeMeta(snap.meta.home);
+    if (!snap.meta.home) await idbSetMeta("home", homeMeta);
+    const plannerMeta = sanitizePlannerMeta(snap.meta.planner);
+    if (snap.meta.planner && !plannerMeta) await idbSetMeta("planner", plannerMeta);
+
+    setHome(homeMeta);
+    setPlanner(plannerMeta);
+    setRooms(nextRooms);
+    setMeasurements(snap.measurements);
+    setItems(snap.items);
+    setOptions(snap.options);
+
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    reloadAll();
+    return subscribeDbChanges(() => {
+      // Keep it simple: reload everything (dataset is tiny).
+      reloadAll();
+    });
+  }, [reloadAll]);
+
+  const createItem = useCallback(
+    async (partial: Partial<Item>) => {
+      const ts = nowMs();
+      const room = normalizeRoomId(partial.room) ?? "Living";
+      const allExisting = await idbGetAll<Item>("items");
+      const minSort = allExisting
+        .filter((i) => i.syncState !== "deleted" && i.room === room && typeof i.sort === "number")
+        .reduce((min, i) => Math.min(min, i.sort as number), 0);
+      const sort = minSort - 1; // New items bubble to the top of the room list.
+      const id = newId("i");
+      const item: Item = {
+        id,
+        remoteId: null,
+        syncState: "dirty",
+        name: (partial.name || "").toString().trim() || "New item",
+        room,
+        category: (partial.category || "Other").toString().trim() || "Other",
+        status: normalizeStatus(partial.status),
+        sort,
+        price: typeof partial.price === "number" ? partial.price : null,
+        qty: typeof partial.qty === "number" && partial.qty > 0 ? Math.round(partial.qty) : 1,
+        store: typeof partial.store === "string" ? partial.store : null,
+        link: typeof partial.link === "string" ? partial.link : null,
+        notes: typeof partial.notes === "string" ? partial.notes : null,
+        priority: typeof partial.priority === "number" ? partial.priority : null,
+        dimensions: partial.dimensions ? partial.dimensions : undefined,
+        specs: partial.specs ? partial.specs : null,
+        provenance: makeHumanCreatedProvenance(partial.provenance, ts),
+        createdAt: ts,
+        updatedAt: ts,
+      };
+      await idbPut("items", item);
+      notifyDbChanged();
+      return id;
+    },
+    [],
+  );
+
+  const updateItem = useCallback(async (id: string, patch: Partial<Item>) => {
+    const all = await idbGetAll<Item>("items");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    const ts = nowMs();
+    const next: Item = {
+      ...cur,
+      ...patch,
+      room: normalizeRoomId(patch.room ?? cur.room) ?? cur.room,
+      status: normalizeStatus(patch.status ?? cur.status),
+      category: typeof patch.category === "string" ? patch.category : cur.category,
+      name: typeof patch.name === "string" ? patch.name : cur.name,
+      updatedAt: ts,
+      syncState: patch.syncState ?? "dirty",
+      provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
+    };
+    await idbPut("items", next);
+    notifyDbChanged();
+  }, []);
+
+  const deleteItem = useCallback(async (id: string) => {
+    const all = await idbGetAll<Item>("items");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    await idbPut("items", { ...cur, syncState: "deleted", updatedAt: nowMs() });
+    notifyDbChanged();
+  }, []);
+
+  const createOption = useCallback(async (partial: Partial<Option> & { itemId: string }) => {
+    const ts = nowMs();
+    const allExisting = await idbGetAll<Option>("options");
+    const minSort = allExisting
+      .filter((o) => o.syncState !== "deleted" && o.itemId === partial.itemId && typeof o.sort === "number")
+      .reduce((min, o) => Math.min(min, o.sort as number), 0);
+    const sort = minSort - 1;
+    const id = newId("o");
+    const opt: Option = {
+      id,
+      remoteId: null,
+      syncState: "dirty",
+      itemId: partial.itemId,
+      title: (partial.title || "").toString().trim() || "Option",
+      sort,
+      store: typeof partial.store === "string" ? partial.store : null,
+      link: typeof partial.link === "string" ? partial.link : null,
+      promoCode: typeof partial.promoCode === "string" ? partial.promoCode : null,
+      price: typeof partial.price === "number" ? partial.price : null,
+      shipping: typeof partial.shipping === "number" ? partial.shipping : null,
+      taxEstimate: typeof partial.taxEstimate === "number" ? partial.taxEstimate : null,
+      discount: typeof partial.discount === "number" ? partial.discount : null,
+      dimensionsText: typeof partial.dimensionsText === "string" ? partial.dimensionsText : null,
+      notes: typeof partial.notes === "string" ? partial.notes : null,
+      selected: Boolean(partial.selected),
+      provenance: makeHumanCreatedProvenance(partial.provenance, ts),
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    await idbPut("options", opt);
+    notifyDbChanged();
+    return id;
+  }, []);
+
+  const updateOption = useCallback(async (id: string, patch: Partial<Option>) => {
+    const all = await idbGetAll<Option>("options");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    const ts = nowMs();
+    const next: Option = {
+      ...cur,
+      ...patch,
+      updatedAt: ts,
+      syncState: patch.syncState ?? "dirty",
+      provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
+    };
+    await idbPut("options", next);
+    notifyDbChanged();
+  }, []);
+
+  const deleteOption = useCallback(async (id: string) => {
+    const all = await idbGetAll<Option>("options");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    await idbPut("options", { ...cur, syncState: "deleted", updatedAt: nowMs() });
+    notifyDbChanged();
+  }, []);
+
+  const createMeasurement = useCallback(async (partial: Partial<Measurement> & { room: RoomId }) => {
+    const ts = nowMs();
+    const allExisting = await idbGetAll<Measurement>("measurements");
+    const minSort = allExisting
+      .filter((m) => m.syncState !== "deleted" && m.room === partial.room && typeof m.sort === "number")
+      .reduce((min, m) => Math.min(min, m.sort as number), 0);
+    const sort = minSort - 1;
+    const id = newId("m");
+    const m: Measurement = {
+      id,
+      remoteId: null,
+      syncState: "dirty",
+      room: partial.room,
+      label: (partial.label || "").toString().trim() || "Measurement",
+      valueIn: typeof partial.valueIn === "number" ? partial.valueIn : 0,
+      sort,
+      confidence:
+        partial.confidence === "low" || partial.confidence === "med" || partial.confidence === "high"
+          ? partial.confidence
+          : null,
+      forCategory: typeof partial.forCategory === "string" ? partial.forCategory : null,
+      forItemId: typeof partial.forItemId === "string" ? partial.forItemId : null,
+      notes: typeof partial.notes === "string" ? partial.notes : null,
+      provenance: makeHumanCreatedProvenance(partial.provenance, ts),
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    await idbPut("measurements", m);
+    notifyDbChanged();
+    return id;
+  }, []);
+
+  const updateMeasurement = useCallback(async (id: string, patch: Partial<Measurement>) => {
+    const all = await idbGetAll<Measurement>("measurements");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    const ts = nowMs();
+    const next: Measurement = {
+      ...cur,
+      ...patch,
+      room: normalizeRoomId(patch.room ?? cur.room) ?? cur.room,
+      forCategory:
+        patch.forCategory === null ? null : typeof patch.forCategory === "string" ? patch.forCategory : cur.forCategory ?? null,
+      forItemId:
+        patch.forItemId === null ? null : typeof patch.forItemId === "string" ? patch.forItemId : cur.forItemId ?? null,
+      updatedAt: ts,
+      syncState: patch.syncState ?? "dirty",
+      provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
+    };
+    await idbPut("measurements", next);
+    notifyDbChanged();
+  }, []);
+
+  const deleteMeasurement = useCallback(async (id: string) => {
+    const all = await idbGetAll<Measurement>("measurements");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    await idbPut("measurements", { ...cur, syncState: "deleted", updatedAt: nowMs() });
+    notifyDbChanged();
+  }, []);
+
+  const updateRoom = useCallback(async (id: RoomId, patch: Partial<Room>) => {
+    const all = await idbGetAll<Room>("rooms");
+    const cur = all.find((x) => x.id === id);
+    const ts = nowMs();
+    const base: Room = cur || { id, notes: "", createdAt: ts, updatedAt: ts, syncState: "dirty", remoteId: null };
+    const next: Room = {
+      ...base,
+      ...patch,
+      id,
+      notes: typeof patch.notes === "string" ? patch.notes : base.notes,
+      updatedAt: ts,
+      syncState: patch.syncState ?? "dirty",
+      provenance: touchProvenanceForHumanEdit(base.provenance, patch.provenance, ts),
+    };
+    await idbPut("rooms", next);
+    notifyDbChanged();
+  }, []);
+
+  const reorderRooms = useCallback(async (orderedRoomIds: RoomId[]) => {
+    const all = await idbGetAll<Room>("rooms");
+    const roomById = new Map(all.filter((r) => r.syncState !== "deleted").map((r) => [r.id, r]));
+
+    // Keep any missing rooms at the end in a stable order.
+    const ordered = orderedRoomIds.filter((rid) => roomById.has(rid));
+    const remaining = ROOMS.filter((rid) => !ordered.includes(rid)).filter((rid) => roomById.has(rid));
+    const finalIds = [...ordered, ...remaining];
+
+    const ts = nowMs();
+    const updates: Room[] = finalIds.map((rid, idx) => {
+      const cur = roomById.get(rid)!;
+      return { ...cur, sort: idx, updatedAt: ts, syncState: "dirty" };
+    });
+    await idbBulkPut("rooms", updates);
+    notifyDbChanged();
+  }, []);
+
+  const reorderItems = useCallback(async (roomId: RoomId, orderedItemIds: string[]) => {
+    const all = await idbGetAll<Item>("items");
+    const inRoom = all.filter((i) => i.syncState !== "deleted" && i.room === roomId);
+    const byId = new Map(inRoom.map((i) => [i.id, i]));
+
+    function rank(it: Item) {
+      return typeof it.sort === "number" ? it.sort : 999999;
+    }
+
+    const currentIds = [...inRoom]
+      .sort((a, b) => {
+        const sa = rank(a);
+        const sb = rank(b);
+        if (sa !== sb) return sa - sb;
+        const pa = a.priority ?? 999;
+        const pb = b.priority ?? 999;
+        if (pa !== pb) return pa - pb;
+        return b.updatedAt - a.updatedAt;
+      })
+      .map((i) => i.id);
+
+    const ordered = orderedItemIds.filter((id) => byId.has(id));
+    const remaining = currentIds.filter((id) => !ordered.includes(id));
+    const finalIds = [...ordered, ...remaining];
+
+    const ts = nowMs();
+    const updates: Item[] = finalIds.map((id, idx) => {
+      const cur = byId.get(id)!;
+      return { ...cur, sort: idx, updatedAt: ts, syncState: "dirty" };
+    });
+    await idbBulkPut("items", updates);
+    notifyDbChanged();
+  }, []);
+
+  const reorderMeasurements = useCallback(async (roomId: RoomId, orderedMeasurementIds: string[]) => {
+    const all = await idbGetAll<Measurement>("measurements");
+    const inRoom = all.filter((m) => m.syncState !== "deleted" && m.room === roomId);
+    const byId = new Map(inRoom.map((m) => [m.id, m]));
+
+    function rank(m: Measurement) {
+      return typeof m.sort === "number" ? m.sort : 999999;
+    }
+
+    const currentIds = [...inRoom]
+      .sort((a, b) => {
+        const sa = rank(a);
+        const sb = rank(b);
+        if (sa !== sb) return sa - sb;
+        return a.label.localeCompare(b.label);
+      })
+      .map((m) => m.id);
+
+    const ordered = orderedMeasurementIds.filter((id) => byId.has(id));
+    const remaining = currentIds.filter((id) => !ordered.includes(id));
+    const finalIds = [...ordered, ...remaining];
+
+    const ts = nowMs();
+    const updates: Measurement[] = finalIds.map((id, idx) => {
+      const cur = byId.get(id)!;
+      return { ...cur, sort: idx, updatedAt: ts, syncState: "dirty" };
+    });
+    await idbBulkPut("measurements", updates);
+    notifyDbChanged();
+  }, []);
+
+  const reorderOptions = useCallback(async (itemId: string, orderedOptionIds: string[]) => {
+    const all = await idbGetAll<Option>("options");
+    const forItem = all.filter((o) => o.syncState !== "deleted" && o.itemId === itemId);
+    const byId = new Map(forItem.map((o) => [o.id, o]));
+
+    function rank(o: Option) {
+      return typeof o.sort === "number" ? o.sort : 999999;
+    }
+
+    const currentIds = [...forItem]
+      .sort((a, b) => {
+        const sa = rank(a);
+        const sb = rank(b);
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      })
+      .map((o) => o.id);
+
+    const ordered = orderedOptionIds.filter((id) => byId.has(id));
+    const remaining = currentIds.filter((id) => !ordered.includes(id));
+    const finalIds = [...ordered, ...remaining];
+
+    const ts = nowMs();
+    const updates: Option[] = finalIds.map((id, idx) => {
+      const cur = byId.get(id)!;
+      return { ...cur, sort: idx, updatedAt: ts, syncState: "dirty" };
+    });
+    await idbBulkPut("options", updates);
+    notifyDbChanged();
+  }, []);
+
+  const renameCategory = useCallback(async (oldName: string, newName: string) => {
+    const from = oldName.trim();
+    const to = newName.trim();
+    if (!from || !to) return;
+    if (from.toLowerCase() === to.toLowerCase()) return;
+
+    const ts = nowMs();
+
+    const allItems = await idbGetAll<Item>("items");
+    const nextItems: Item[] = [];
+    const fromLower = from.toLowerCase();
+    for (const it of allItems) {
+      if (it.syncState === "deleted") continue;
+      if (String(it.category || "").trim().toLowerCase() !== fromLower) continue;
+      nextItems.push({ ...it, category: to, updatedAt: ts, syncState: "dirty" });
+    }
+    if (nextItems.length) await idbBulkPut("items", nextItems);
+
+    const allMeas = await idbGetAll<Measurement>("measurements");
+    const nextMeas: Measurement[] = [];
+    for (const m of allMeas) {
+      if (m.syncState === "deleted") continue;
+      if (String(m.forCategory || "").trim().toLowerCase() !== fromLower) continue;
+      nextMeas.push({ ...m, forCategory: to, updatedAt: ts, syncState: "dirty" });
+    }
+    if (nextMeas.length) await idbBulkPut("measurements", nextMeas);
+
+    if (nextItems.length || nextMeas.length) notifyDbChanged();
+  }, []);
+
+  const exportBundle = useCallback(
+    async (opts?: { includeDeleted?: boolean }): Promise<ExportBundleV2> => {
+      const snap = await idbGetSnapshot();
+      const includeDeleted = Boolean(opts?.includeDeleted);
+      const itemsOut = includeDeleted ? snap.items : snap.items.filter((i) => i.syncState !== "deleted");
+      const optsOut = includeDeleted ? snap.options : snap.options.filter((o) => o.syncState !== "deleted");
+      const measOut = includeDeleted ? snap.measurements : snap.measurements.filter((m) => m.syncState !== "deleted");
+      const roomsOut = includeDeleted ? snap.rooms : snap.rooms.filter((r) => r.syncState !== "deleted");
+      const homeMeta = sanitizeHomeMeta(snap.meta.home);
+      const plannerMeta = sanitizePlannerMeta(snap.meta.planner);
+      const exportedAt = nowMs();
+      const bundle: ExportBundleV2 = {
+        version: 2,
+        exportedAt: new Date(exportedAt).toISOString(),
+        exportMeta: {
+          exportedAt,
+          exportedBy: "human",
+          schemaVersion: 2,
+          sessionId: newId("export"),
+        },
+        home: homeMeta,
+        planner: plannerMeta,
+        rooms: roomsOut,
+        measurements: measOut,
+        items: itemsOut,
+        options: optsOut,
+      };
+      return bundle;
+    },
+    [],
+  );
+
+  const importBundle = useCallback(async (bundle: unknown, opts?: { mode?: "merge" | "replace"; aiAssisted?: boolean }) => {
+    const normalized = normalizeBundle(bundle);
+    if (!normalized) {
+      const keys =
+        bundle && typeof bundle === "object" && !Array.isArray(bundle) ? Object.keys(bundle as Record<string, unknown>) : [];
+      throw new Error(`Unrecognized import format${keys.length ? ` (keys: ${keys.join(", ")})` : ""}`);
+    }
+
+    const mode = opts?.mode || "merge";
+    const sessionId = newId("import");
+    const importedAt = nowMs();
+
+    const detectedAi =
+      normalized.exportMeta?.exportedBy === "ai" ||
+      [...normalized.items, ...normalized.options, ...normalized.measurements].some(
+        (e) => e.provenance?.createdBy === "ai" || e.provenance?.lastEditedBy === "ai",
+      );
+    const aiAssisted = Boolean(opts?.aiAssisted) || detectedAi;
+    const actor: Actor = aiAssisted ? "ai" : "import";
+
+    const existingSnap = mode === "merge" ? await idbGetSnapshot() : null;
+
+    function asStringArray(value: unknown): string[] {
+      return Array.isArray(value) ? value.map((v) => String(v ?? "").trim()).filter(Boolean) : [];
+    }
+
+    function uniqStable(values: string[]): string[] {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      for (const v of values) {
+        if (seen.has(v)) continue;
+        seen.add(v);
+        out.push(v);
+      }
+      return out;
+    }
+
+    function buildNewProvenance(incoming: Provenance | undefined): Provenance {
+      const base = sanitizeProvenance(incoming) ?? {};
+      return {
+        ...base,
+        createdBy: actor,
+        createdAt: importedAt,
+        lastEditedBy: actor,
+        lastEditedAt: importedAt,
+        dataSource: base.dataSource ?? "estimated",
+        sourceRef: typeof base.sourceRef === "undefined" ? null : base.sourceRef,
+        reviewStatus: "needs_review",
+        verifiedAt: null,
+        verifiedBy: null,
+        modifiedFields: null,
+        changeLog: null,
+      };
+    }
+
+    function buildChangedProvenance(existing: Provenance | undefined, incoming: Provenance | undefined, changes: ReturnType<typeof diffMeasurement>): Provenance {
+      const prev = sanitizeProvenance(existing) ?? {};
+      const inc = sanitizeProvenance(incoming) ?? {};
+
+      const prevFields = asStringArray(prev.modifiedFields);
+      const nextFields = uniqStable([...prevFields, ...changes.map((c) => c.field)]);
+
+      const prevLog = Array.isArray(prev.changeLog) ? prev.changeLog : [];
+      const nextLog = [
+        ...prevLog,
+        ...changes.map((c) => ({
+          field: c.field,
+          from: c.from,
+          to: c.to,
+          by: actor,
+          at: importedAt,
+          sessionId,
+        })),
+      ];
+
+      return {
+        ...prev,
+        ...inc,
+        createdBy: typeof prev.createdBy === "undefined" ? inc.createdBy : prev.createdBy,
+        createdAt: typeof prev.createdAt === "undefined" ? inc.createdAt : prev.createdAt,
+        verifiedAt: typeof prev.verifiedAt === "undefined" ? inc.verifiedAt : prev.verifiedAt,
+        verifiedBy: typeof prev.verifiedBy === "undefined" ? inc.verifiedBy : prev.verifiedBy,
+        lastEditedBy: actor,
+        lastEditedAt: importedAt,
+        reviewStatus: "ai_modified",
+        modifiedFields: nextFields,
+        changeLog: nextLog,
+      };
+    }
+
+    if (mode === "replace") {
+      await idbResetAll();
+      await idbSetMeta("home", normalized.home);
+    }
+
+    if (normalized.planner) {
+      await idbSetMeta("planner", sanitizePlannerMeta(normalized.planner));
+    }
+
+    await idbBulkPut("rooms", normalized.rooms);
+
+    const existingMeasById = new Map((existingSnap?.measurements || []).map((m) => [m.id, m] as const));
+    const measToPut: Measurement[] = [];
+    for (const incoming of normalized.measurements) {
+      const existing = existingMeasById.get(incoming.id);
+      if (!existing) {
+        measToPut.push({
+          ...incoming,
+          syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+          remoteId: typeof incoming.remoteId === "undefined" ? null : incoming.remoteId,
+          updatedAt: importedAt,
+          provenance: buildNewProvenance(incoming.provenance),
+        });
+        continue;
+      }
+      const changes = diffMeasurement(existing, incoming);
+      if (!changes.length) continue;
+      measToPut.push({
+        ...existing,
+        ...incoming,
+        createdAt: existing.createdAt,
+        remoteId: typeof existing.remoteId === "undefined" ? incoming.remoteId : existing.remoteId,
+        syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+        updatedAt: importedAt,
+        provenance: buildChangedProvenance(existing.provenance, incoming.provenance, changes),
+      });
+    }
+    if (measToPut.length) await idbBulkPut("measurements", measToPut);
+
+    const existingItemsById = new Map((existingSnap?.items || []).map((i) => [i.id, i] as const));
+    const itemsToPut: Item[] = [];
+    for (const incoming of normalized.items) {
+      const existing = existingItemsById.get(incoming.id);
+      if (!existing) {
+        itemsToPut.push({
+          ...incoming,
+          syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+          remoteId: typeof incoming.remoteId === "undefined" ? null : incoming.remoteId,
+          updatedAt: importedAt,
+          provenance: buildNewProvenance(incoming.provenance),
+        });
+        continue;
+      }
+      const changes = diffItem(existing, incoming);
+      if (!changes.length) continue;
+      itemsToPut.push({
+        ...existing,
+        ...incoming,
+        createdAt: existing.createdAt,
+        remoteId: typeof existing.remoteId === "undefined" ? incoming.remoteId : existing.remoteId,
+        syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+        updatedAt: importedAt,
+        provenance: buildChangedProvenance(existing.provenance, incoming.provenance, changes),
+      });
+    }
+    if (itemsToPut.length) await idbBulkPut("items", itemsToPut);
+
+    const existingOptsById = new Map((existingSnap?.options || []).map((o) => [o.id, o] as const));
+    const optsToPut: Option[] = [];
+    for (const incoming of normalized.options) {
+      const existing = existingOptsById.get(incoming.id);
+      if (!existing) {
+        optsToPut.push({
+          ...incoming,
+          syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+          remoteId: typeof incoming.remoteId === "undefined" ? null : incoming.remoteId,
+          updatedAt: importedAt,
+          provenance: buildNewProvenance(incoming.provenance),
+        });
+        continue;
+      }
+      const changes = diffOption(existing, incoming);
+      if (!changes.length) continue;
+      optsToPut.push({
+        ...existing,
+        ...incoming,
+        createdAt: existing.createdAt,
+        remoteId: typeof existing.remoteId === "undefined" ? incoming.remoteId : existing.remoteId,
+        syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+        updatedAt: importedAt,
+        provenance: buildChangedProvenance(existing.provenance, incoming.provenance, changes),
+      });
+    }
+    if (optsToPut.length) await idbBulkPut("options", optsToPut);
+    notifyDbChanged();
+  }, []);
+
+  const resetLocal = useCallback(async () => {
+    await idbResetAll();
+    notifyDbChanged();
+  }, []);
+
+  const loadExampleTownHollywood = useCallback(
+    async (mode: "merge" | "replace" = "merge") => {
+      const example = getTownHollywoodExampleBundle();
+      await importBundle(example, { mode });
+    },
+    [importBundle],
+  );
+
+  const value = useMemo<DataContextValue>(
+    () => ({
+      ready,
+      home,
+      planner,
+      rooms,
+      measurements,
+      items,
+      options,
+      saveHome,
+      savePlanner,
+      reorderRooms,
+      reorderItems,
+      reorderMeasurements,
+      reorderOptions,
+      renameCategory,
+      createItem,
+      updateItem,
+      deleteItem,
+      createOption,
+      updateOption,
+      deleteOption,
+      createMeasurement,
+      updateMeasurement,
+      deleteMeasurement,
+      updateRoom,
+      exportBundle,
+      importBundle,
+      resetLocal,
+      loadExampleTownHollywood,
+    }),
+    [
+      ready,
+      home,
+      planner,
+      rooms,
+      measurements,
+      items,
+      options,
+      saveHome,
+      savePlanner,
+      reorderRooms,
+      reorderItems,
+      reorderMeasurements,
+      reorderOptions,
+      renameCategory,
+      createItem,
+      updateItem,
+      deleteItem,
+      createOption,
+      updateOption,
+      deleteOption,
+      createMeasurement,
+      updateMeasurement,
+      deleteMeasurement,
+      updateRoom,
+      exportBundle,
+      importBundle,
+      resetLocal,
+      loadExampleTownHollywood,
+    ],
+  );
+
+  return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
+}
+
+export function useData() {
+  const ctx = useContext(DataContext);
+  if (!ctx) throw new Error("useData must be used within <DataProvider />");
+  return ctx;
+}

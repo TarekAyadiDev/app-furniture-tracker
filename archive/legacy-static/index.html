@@ -1,0 +1,3182 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>2B Furnishing Tracker (Local)</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --card: #fff;
+      --border: #e3e7ef;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --accent-2: #10b981;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --shadow: 0 10px 30px rgba(17, 24, 39, 0.08);
+      --radius: 10px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      max-width: 1180px;
+      line-height: 1.5;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+
+    .small {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      box-shadow: var(--shadow);
+      margin: 12px 0;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+
+    input,
+    select,
+    textarea,
+    button {
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+
+    input[type="number"] {
+      width: 120px;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 68px;
+      resize: vertical;
+    }
+
+    button {
+      cursor: pointer;
+      background: var(--accent);
+      color: white;
+      border: none;
+      font-weight: 600;
+      transition: transform 0.08s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+    }
+
+    button.secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--border);
+      box-shadow: none;
+    }
+
+    button.ghost {
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--muted);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 20px rgba(37, 99, 235, 0.16);
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .grow {
+      flex: 1;
+      min-width: 200px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin: 8px 0 4px;
+    }
+
+    .tabs {
+      display: inline-flex;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin-top: 10px;
+      box-shadow: var(--shadow);
+    }
+
+    .tab-btn {
+      background: #fff;
+      border: none;
+      padding: 10px 16px;
+      font-weight: 600;
+      color: var(--muted);
+      border-right: 1px solid var(--border);
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+
+    .tab-btn:last-child {
+      border-right: none;
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .tab-section {
+      display: none;
+      margin-top: 12px;
+    }
+
+    .tab-section.active {
+      display: block;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: #eef2ff;
+      color: #3730a3;
+      border: 1px solid #e0e7ff;
+    }
+
+    .status-pill {
+      background: #ecfeff;
+      color: #0f172a;
+      border: 1px solid #bae6fd;
+    }
+
+    .priority-pill {
+      background: #fff7ed;
+      color: #9a3412;
+      border: 1px solid #fed7aa;
+    }
+
+    .list-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+
+    .badge {
+      font-size: 12px;
+      color: var(--muted);
+      background: #eef2f7;
+      padding: 2px 6px;
+      border-radius: 6px;
+      display: inline-block;
+      margin-left: 6px;
+    }
+
+    .error-banner {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      color: #b91c1c;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+
+    .success-banner {
+      background: #ecfdf3;
+      border: 1px solid #bbf7d0;
+      color: #166534;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin: 10px 0;
+    }
+
+    .table-mapping {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .table-mapping th,
+    .table-mapping td {
+      border: 1px solid var(--border);
+      padding: 6px 8px;
+      text-align: left;
+    }
+
+    .table-mapping th {
+      background: #f8fafc;
+      color: #475569;
+    }
+
+    .mapping-missing {
+      border-color: #fecaca !important;
+      background: #fff1f2 !important;
+    }
+
+    .mapping-ok {
+      border-color: #bbf7d0 !important;
+      background: #ecfdf3 !important;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .group-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0 6px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .option-total {
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .inline-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+    }
+
+    .inline-link:hover {
+      text-decoration: underline;
+    }
+
+    .mono {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      color: #374151;
+    }
+
+    .light {
+      color: var(--muted);
+    }
+
+    .import-preview {
+      margin-top: 10px;
+      max-height: 420px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background: #f8fafc;
+    }
+
+    .import-row {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin: 10px 0;
+    }
+
+    .import-row-top {
+      display: grid;
+      grid-template-columns: 22px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .import-row-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .import-row-title {
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .import-row-sub {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
+    details.data-tools {
+      padding: 0;
+    }
+
+    details.data-tools > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 12px 14px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      user-select: none;
+    }
+
+    details.data-tools > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .data-tools-summary-left {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .data-tools-toggle {
+      font-family: "SFMono-Regular", Consolas, monospace;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      padding-top: 2px;
+    }
+
+    .data-tools-toggle::after {
+      content: "[+]";
+    }
+
+    details.data-tools[open] .data-tools-toggle::after {
+      content: "[-]";
+    }
+
+    .data-tools-body {
+      padding: 0 14px 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>2B Furnishing Tracker (Local)</h1>
+  <div class="small">
+    Single-file static app. Uses Airtable directly via <code>config.js</code> (token + base + table). Keep that file private.
+    Record types live in one table; mapping keeps you compatible with old column names.
+  </div>
+
+  <div class="toolbar">
+    <div class="row" style="gap:8px;">
+      <div>
+        <label>Filter record type</label>
+        <select id="filterRecordType">
+          <option value="">All</option>
+          <option>Measurement</option>
+          <option>Item</option>
+          <option>Option</option>
+          <option>Purchase</option>
+          <option>Note</option>
+        </select>
+      </div>
+      <div>
+        <label>Filter status</label>
+        <select id="filterStatus">
+          <option value="">All</option>
+          <option>Idea</option>
+          <option>Shortlist</option>
+          <option>Selected</option>
+          <option>Ordered</option>
+          <option>Delivered</option>
+          <option>Installed</option>
+          <option>Returned</option>
+        </select>
+      </div>
+    </div>
+    <div class="row" style="gap:8px; align-items:flex-end;">
+      <button id="btnReload">Reload</button>
+      <button class="secondary" id="btnSchema">Schema check (optional)</button>
+      <button class="secondary" id="btnSettings">Field mapping</button>
+    </div>
+  </div>
+
+  <div id="globalError"></div>
+
+  <div id="schemaBox" class="card hidden"></div>
+
+	  <div id="settingsPanel" class="card hidden">
+	    <div class="row" style="align-items:center; justify-content:space-between;">
+	      <div>
+	        <strong>Field Mapping</strong>
+	        <div class="small">Map semantic fields to your actual Airtable column names. Stored locally in your browser.</div>
+	      </div>
+	      <button class="secondary" id="btnCloseSettings">Close</button>
+	    </div>
+	    <div id="mappingTableWrap" style="margin-top:8px; max-height:340px; overflow:auto;"></div>
+	    <div class="row" style="justify-content:space-between; margin-top:10px; flex-wrap:wrap;">
+	      <div class="row" style="gap:8px; align-items:center;">
+	        <button class="secondary" id="btnLoadAirtableFields">Load Airtable columns (optional)</button>
+	        <span id="mappingMsg" class="small light"></span>
+	      </div>
+	      <div class="row" style="gap:8px;">
+	        <button id="btnSaveMapping">Save mapping</button>
+	        <button class="ghost" id="btnResetMapping">Reset to defaults</button>
+	      </div>
+	    </div>
+	    <div id="mappingDiag" class="small" style="margin-top:6px;"></div>
+
+	    <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
+	      <div class="row" style="justify-content:space-between; align-items:center;">
+	        <div>
+	          <strong>Item templates</strong>
+	          <div class="small">Optional. Defines category presets and spec fields for items. Stored locally in your browser.</div>
+	        </div>
+	        <button class="secondary" id="btnToggleTemplates">Edit templates JSON</button>
+	      </div>
+	      <div id="templatesEditor" class="hidden" style="margin-top:8px;">
+	        <textarea id="templatesJson" class="mono" style="width:100%; height:220px;"></textarea>
+	        <div class="row" style="justify-content:space-between; margin-top:8px;">
+	          <button id="btnSaveTemplates">Save templates</button>
+	          <button class="ghost" id="btnResetTemplates">Reset templates</button>
+	        </div>
+	        <div id="templatesMsg" class="small" style="margin-top:6px;"></div>
+	      </div>
+	    </div>
+	  </div>
+
+		  <details id="dataTools" class="card data-tools">
+		    <summary>
+		      <div class="data-tools-summary-left">
+		        <strong>Data tools</strong>
+		        <div class="small light">Import / export JSON (optional)</div>
+		      </div>
+		      <span class="data-tools-toggle" aria-hidden="true"></span>
+		    </summary>
+		    <div class="data-tools-body">
+		      <div id="importCard">
+		        <h3 style="margin:0 0 6px;">Import (JSON or Markdown tasks)</h3>
+		        <div class="row" style="gap:8px; align-items:center;">
+		          <label class="small" style="margin:0;">
+		            <span>JSON file</span>
+		            <input type="file" id="jsonFileInput" accept=".json,application/json" />
+		          </label>
+		          <button class="secondary" id="btnClearImport">Clear preview</button>
+		        </div>
+		        <div style="margin-top:8px;">
+		          <label>Paste Markdown checklist</label>
+		          <textarea id="mdInput" placeholder="- [ ] Sectional #Living #P0"></textarea>
+		          <button class="secondary" id="btnParseMarkdown" style="margin-top:6px;">Preview Markdown</button>
+		        </div>
+		        <div class="small" style="margin-top:6px;">
+		          JSON accepts <code>records</code> or typed arrays: <code>measurements</code>, <code>items</code>, <code>options</code>, <code>purchases</code>, <code>notes</code>.
+		          Each record may also set <code>recordType</code>.
+		        </div>
+		        <div id="importPreview" class="import-preview"></div>
+		        <div id="importActions" class="row hidden" style="align-items:center; margin-top:6px;">
+		          <button id="btnImportSelected">Import selected</button>
+		          <button class="secondary" id="btnSelectAll">Select all</button>
+		          <button class="secondary" id="btnDeselectAll">Deselect all</button>
+		          <span id="importMsg" class="small"></span>
+		        </div>
+		      </div>
+	
+		      <div id="exportCard" style="margin-top:14px; border-top:1px solid var(--border); padding-top:12px;">
+		        <h3 style="margin:0 0 6px;">Export (round-trip JSON)</h3>
+		        <div class="row" style="gap:8px; align-items:flex-end;">
+		          <div class="grow">
+		            <label>Title</label>
+		            <input id="exportTitle" type="text" value="Town Hollywood B1.1 Furnishing Plan" style="width:100%;" />
+		          </div>
+		          <div>
+		            <label>Scope</label>
+		            <select id="exportScope">
+		              <option value="all">All records</option>
+		              <option value="filtered">Current filters</option>
+		            </select>
+		          </div>
+		          <div style="min-width:170px;">
+		            <label class="small" style="margin:0; display:flex; align-items:center; gap:6px;">
+		              <input type="checkbox" id="exportIncludeIds" checked />
+		              Include Airtable ids (updates on import)
+		            </label>
+		          </div>
+		          <button class="secondary" id="btnGenerateExport">Generate</button>
+		          <button id="btnDownloadExport">Download JSON</button>
+		          <button class="secondary" id="btnCopyExport">Copy JSON</button>
+		        </div>
+		        <textarea id="exportOutput" class="mono" style="margin-top:8px; height:180px; width:100%;" placeholder="Generate to preview..."></textarea>
+		        <div class="small" id="exportMsg" style="margin-top:6px;"></div>
+		      </div>
+		    </div>
+		  </details>
+
+	  <div class="tabs">
+	    <button class="tab-btn active" data-tab="measurements">Measurements</button>
+	    <button class="tab-btn" data-tab="items">Items</button>
+    <button class="tab-btn" data-tab="options">Options / Compare</button>
+  </div>
+
+  <div id="tab-measurements" class="tab-section active">
+    <div class="card">
+      <h3 style="margin:0 0 8px;">Add measurement</h3>
+      <div class="row">
+        <div class="grow">
+          <label>Label / Title</label>
+          <input id="mLabel" type="text" placeholder="Sofa length, console depth..." style="width:100%;" />
+        </div>
+        <div>
+          <label>Room</label>
+          <select id="mRoom"></select>
+        </div>
+        <div>
+          <label>Value</label>
+          <input id="mValue" type="number" step="0.01" placeholder="120" />
+        </div>
+        <div>
+          <label>Unit</label>
+          <select id="mUnit">
+            <option value="cm">cm</option>
+            <option value="in">in</option>
+          </select>
+        </div>
+        <div>
+          <label>Confidence</label>
+          <select id="mConfidence">
+            <option value="">—</option>
+            <option>low</option>
+            <option>med</option>
+            <option>high</option>
+          </select>
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="btnAddMeasurement">Add measurement</button>
+        </div>
+      </div>
+      <div class="small" id="mAddMsg" style="margin-top:6px;"></div>
+    </div>
+    <div id="measurementsList" class="list-grid"></div>
+  </div>
+
+	  <div id="tab-items" class="tab-section">
+	    <div class="card">
+	      <h3 style="margin:0 0 8px;">Add item</h3>
+	      <div class="row">
+	        <div class="grow">
+	          <label>Title</label>
+	          <input id="iTitle" type="text" placeholder="Dining table, Wall art, Lamp..." style="width:100%;" />
+	        </div>
+	        <div>
+	          <label>Room</label>
+	          <select id="iRoom"></select>
+	        </div>
+	        <div>
+	          <label>Category</label>
+	          <select id="iCategory"></select>
+	        </div>
+	        <div>
+	          <label>Status</label>
+	          <select id="iStatus"></select>
+	        </div>
+	        <div>
+	          <label>Priority (1-5)</label>
+	          <input id="iPriority" type="number" min="1" max="5" />
+	        </div>
+	        <div>
+	          <label>Budget target</label>
+	          <input id="iBudget" type="number" step="0.01" placeholder="1200" />
+	        </div>
+	      </div>
+	      <div class="row" style="margin-top:10px;">
+	        <div class="grow">
+	          <label>Link</label>
+	          <input id="iLink" type="text" placeholder="https://..." style="width:100%;" />
+	        </div>
+	        <div class="grow">
+	          <label>Notes</label>
+	          <textarea id="iNotes" placeholder="materials, dimensions, color..." style="width:100%; height:54px;"></textarea>
+	        </div>
+	        <div>
+	          <label>&nbsp;</label>
+	          <button id="btnAddItem">Add item</button>
+	        </div>
+	      </div>
+	      <div id="iSpecsWrap" style="margin-top:10px;"></div>
+	      <div class="small" id="iAddMsg" style="margin-top:6px;"></div>
+	    </div>
+
+	    <div id="itemsList"></div>
+	  </div>
+
+	  <div id="tab-options" class="tab-section">
+	    <div class="card">
+	      <h3 style="margin:0 0 8px;">Add option / candidate</h3>
+      <div class="row">
+        <div class="grow">
+          <label>Parent item</label>
+          <select id="oParent"></select>
+        </div>
+        <div class="grow">
+          <label>Store</label>
+          <input id="oStore" type="text" placeholder="CB2, Ikea, Article..." style="width:100%;" />
+        </div>
+        <div class="grow">
+          <label>Link</label>
+          <input id="oLink" type="text" placeholder="https://..." style="width:100%;" />
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <label>Price</label>
+          <input id="oPrice" type="number" step="0.01" />
+        </div>
+        <div>
+          <label>Discount</label>
+          <input id="oDiscount" type="number" step="0.01" />
+        </div>
+        <div>
+          <label>Shipping</label>
+          <input id="oShipping" type="number" step="0.01" />
+        </div>
+        <div>
+          <label>Tax estimate</label>
+          <input id="oTax" type="number" step="0.01" />
+        </div>
+        <div>
+          <label>Promo code</label>
+          <input id="oPromo" type="text" />
+        </div>
+        <div>
+          <label>&nbsp;</label>
+          <button id="btnAddOption">Add option</button>
+        </div>
+      </div>
+	      <div class="row" style="margin-top:10px;">
+	        <div class="grow">
+	          <label>Dimensions (text)</label>
+	          <input id="oDimensions" type="text" placeholder="80x35x30 in" style="width:100%;" />
+	        </div>
+	      </div>
+	      <div class="row" style="margin-top:10px;">
+	        <div class="grow">
+	          <label>Notes</label>
+	          <textarea id="oNotes" placeholder="size, fabric/color, return policy, delivery notes..." style="width:100%; height:54px;"></textarea>
+	        </div>
+	      </div>
+	      <div class="small" id="oAddMsg" style="margin-top:6px;"></div>
+	    </div>
+
+    <div id="optionsList"></div>
+  </div>
+
+  <script src="./config.js"></script>
+  <script>
+    (() => {
+      "use strict";
+
+      // --- Configuration ---
+      const cfg = window.APP_CONFIG || {};
+      if (!cfg.AIRTABLE_TOKEN || !cfg.BASE_ID || !cfg.TABLE_ID) {
+        document.body.innerHTML = '<div class="error-banner">Missing config.js (AIRTABLE_TOKEN, BASE_ID, TABLE_ID).</div>';
+        return;
+      }
+      const API_BASE = `https://api.airtable.com/v0/${encodeURIComponent(cfg.BASE_ID)}/${encodeURIComponent(cfg.TABLE_ID)}`;
+      const HEADERS = {
+        "Authorization": `Bearer ${cfg.AIRTABLE_TOKEN}`,
+        "Content-Type": "application/json"
+      };
+
+	      // --- Constants ---
+	      const RECORD_TYPES = ["Measurement", "Item", "Option", "Purchase", "Note"];
+	      const ROOM_OPTIONS = ["Living", "Dining", "Master", "Bedroom2", "Balcony", "Entry", "Kitchen", "Bath"];
+	      const ITEM_STATUSES = ["Idea", "Shortlist", "Selected", "Ordered", "Delivered", "Installed", "Returned"];
+	      const SPECS_BLOCK_START = "--- specs ---";
+	      const SPECS_BLOCK_END = "--- /specs ---";
+
+	      const DEFAULT_ITEM_CATEGORY_ORDER = [
+	        "Bed",
+	        "Mattress",
+	        "Nightstand",
+	        "Dresser",
+	        "Sofa",
+	        "Coffee Table",
+	        "TV",
+	        "TV Console",
+	        "Dining Table",
+	        "Dining Chairs",
+	        "Rug",
+	        "Curtains",
+	        "Lighting",
+	        "Balcony Set",
+	        "Appliance",
+	        "Storage",
+	        "Decor",
+	        "Other"
+	      ];
+
+	      // Templates are local-only (UI presets). Record data still lives in Airtable (specs stored in Notes).
+	      const DEFAULT_ITEM_TEMPLATES = {
+	        "Bed": {
+	          fields: [
+	            { key: "size", label: "Size", type: "select", options: ["Twin", "Full", "Queen", "King"] },
+	            { key: "type", label: "Type", type: "select", options: ["Platform", "Frame", "Storage", "Adjustable", "Murphy"] },
+	            { key: "headboard", label: "Headboard", type: "text", placeholder: "yes/no/height" },
+	            { key: "finish", label: "Finish", type: "text", placeholder: "oak, walnut, white..." }
+	          ]
+	        },
+		        "Mattress": {
+		          fields: [
+		            { key: "size", label: "Size", type: "select", options: ["Twin", "Full", "Queen", "King"] },
+		            { key: "type", label: "Type", type: "select", options: ["Hybrid", "Memory foam", "Latex", "Innerspring"] },
+		            { key: "firmness", label: "Firmness", type: "text", placeholder: "soft/med/firm" }
+		          ]
+		        },
+		        "Nightstand": {
+		          fields: [
+		            { key: "width_in", label: "Width (in)", type: "number" },
+		            { key: "depth_in", label: "Depth (in)", type: "number" },
+		            { key: "drawers", label: "Drawers", type: "number" },
+		            { key: "finish", label: "Finish", type: "text" }
+		          ]
+		        },
+		        "Dresser": {
+		          fields: [
+		            { key: "width_in", label: "Width (in)", type: "number" },
+		            { key: "depth_in", label: "Depth (in)", type: "number" },
+		            { key: "height_in", label: "Height (in)", type: "number" },
+		            { key: "drawers", label: "Drawers", type: "number" }
+		          ]
+		        },
+		        "Coffee Table": {
+		          fields: [
+		            { key: "shape", label: "Shape", type: "select", options: ["Round", "Rect", "Oval", "Square"] },
+		            { key: "length_in", label: "Length (in)", type: "number" },
+		            { key: "width_in", label: "Width (in)", type: "number" },
+		            { key: "diameter_in", label: "Diameter (in)", type: "number" },
+		            { key: "height_in", label: "Height (in)", type: "number" },
+		            { key: "material", label: "Material", type: "text" }
+		          ]
+		        },
+		        "Sofa": {
+		          fields: [
+		            { key: "type", label: "Type", type: "select", options: ["Sofa", "Sectional", "Loveseat", "Sleeper"] },
+		            { key: "length_in", label: "Length (in)", type: "number" },
+	            { key: "depth_in", label: "Depth (in)", type: "number" },
+	            { key: "fabric", label: "Fabric", type: "text", placeholder: "boucle, linen, leather..." },
+	            { key: "color", label: "Color", type: "text" }
+	          ]
+	        },
+	        "TV": {
+	          fields: [
+	            { key: "size_in", label: "Size (in)", type: "number" },
+	            { key: "tech", label: "Tech", type: "select", options: ["OLED", "Mini-LED", "LED"] },
+	            { key: "mount", label: "Mount", type: "select", options: ["Stand", "Wall"] }
+	          ]
+	        },
+	        "TV Console": {
+	          fields: [
+	            { key: "width_in", label: "Width (in)", type: "number" },
+	            { key: "depth_in", label: "Depth (in)", type: "number" },
+	            { key: "style", label: "Style", type: "text", placeholder: "wood, marble, modern..." }
+	          ]
+	        },
+	        "Dining Table": {
+	          fields: [
+	            { key: "shape", label: "Shape", type: "select", options: ["Round", "Rect", "Oval"] },
+	            { key: "length_in", label: "Length (in)", type: "number" },
+	            { key: "width_in", label: "Width (in)", type: "number" },
+	            { key: "diameter_in", label: "Diameter (in)", type: "number" },
+	            { key: "seats", label: "Seats", type: "number" }
+	          ]
+	        },
+	        "Dining Chairs": {
+	          fields: [
+	            { key: "count", label: "Count", type: "number" },
+	            { key: "material", label: "Material", type: "text" },
+	            { key: "arm", label: "Arm", type: "select", options: ["No", "Yes"] }
+	          ]
+	        },
+	        "Rug": {
+	          fields: [
+	            { key: "size", label: "Size", type: "text", placeholder: "8x10, 9x12..." },
+	            { key: "material", label: "Material", type: "text", placeholder: "wool, jute..." }
+	          ]
+	        },
+	        "Curtains": {
+	          fields: [
+	            { key: "panel_count", label: "Panel count", type: "number" },
+	            { key: "length_in", label: "Length (in)", type: "number" },
+	            { key: "style", label: "Style", type: "text", placeholder: "blackout, sheer..." }
+	          ]
+	        },
+	        "Lighting": {
+	          fields: [
+	            { key: "type", label: "Type", type: "select", options: ["Floor", "Table", "Ceiling", "Wall"] },
+	            { key: "bulb", label: "Bulb", type: "text", placeholder: "E26, LED..." }
+	          ]
+	        },
+	        "Balcony Set": {
+	          fields: [
+	            { key: "type", label: "Type", type: "select", options: ["Bistro", "Lounge", "Sectional", "Dining"] },
+	            { key: "material", label: "Material", type: "text", placeholder: "teak, metal..." }
+	          ]
+	        },
+	        "Appliance": {
+	          fields: [
+	            { key: "type", label: "Type", type: "text", placeholder: "toaster, vacuum..." },
+	            { key: "power", label: "Power", type: "text", placeholder: "watts, voltage..." }
+	          ]
+	        },
+	        "Storage": {
+	          fields: [
+	            { key: "type", label: "Type", type: "text", placeholder: "shelves, cabinet..." },
+	            { key: "width_in", label: "Width (in)", type: "number" },
+	            { key: "depth_in", label: "Depth (in)", type: "number" },
+	            { key: "height_in", label: "Height (in)", type: "number" }
+	          ]
+	        },
+	        "Decor": {
+	          fields: [
+	            { key: "type", label: "Type", type: "text", placeholder: "art, mirror..." },
+	            { key: "style", label: "Style", type: "text" }
+	          ]
+	        },
+	        "Other": { fields: [] }
+	      };
+      const DEFAULT_MAPPING = {
+        "Record Type": "Record Type",
+        "Title": "Title",
+        "Room": "Room",
+        "Status": "Status",
+        "Priority": "Priority",
+        "Link": "Link",
+        "Notes": "Notes",
+        "Budget Target": "Budget Target",
+        "Price": "Price",
+        "Quantity": "Quantity",
+        "Measure Label": "Measure Label",
+        "Value": "Value",
+        "Unit Entered": "Unit Entered",
+        "Value (cm)": "Value (cm)",
+        "Value (in)": "Value (in)",
+        "Confidence": "Confidence",
+        "Parent Item Key": "Parent Item Key",
+        "Parent Item Record Id": "Parent Item Record Id",
+        "Store": "Store",
+        "Promo Code": "Promo Code",
+        "Discount": "Discount",
+        "Shipping": "Shipping",
+        "Tax Estimate": "Tax Estimate",
+        "Final Total": "Final Total",
+        "Dimensions": "Dimensions",
+        "Order Date": "Order Date",
+        "Order Number": "Order Number",
+        "Expected Delivery": "Expected Delivery",
+        "Actual Delivery": "Actual Delivery",
+        "Return By": "Return By",
+        "Selected Option Id": "Selected Option Id"
+      };
+
+	      // --- State ---
+	      let fieldMapping = loadMapping();
+	      let airtableFieldNames = null; // loaded via Metadata API (optional)
+	      let itemTemplates = loadItemTemplates();
+	      let itemsAccordion = loadAccordionState();
+	      let allRecords = [];
+
+      // --- Helpers ---
+      const el = (id) => document.getElementById(id);
+      const escapeHtml = (str) => {
+        const div = document.createElement("div");
+        div.textContent = String(str ?? "");
+        return div.innerHTML;
+      };
+      const mapField = (semantic) => {
+        const raw = fieldMapping?.[semantic];
+        if (raw === undefined || raw === null) return semantic;
+        const trimmed = String(raw).trim();
+        return trimmed || semantic;
+      };
+      const SINGLE_SELECT_SEMANTICS = new Set([
+        "Record Type",
+        "Room",
+        "Status",
+        "Unit Entered",
+        "Confidence"
+      ]);
+      const DATE_SEMANTICS = new Set([
+        "Order Date",
+        "Expected Delivery",
+        "Actual Delivery",
+        "Return By"
+      ]);
+      const NULL_IF_EMPTY_SEMANTICS = new Set([
+        // Airtable URL fields commonly reject empty strings; null clears the value safely.
+        "Link"
+      ]);
+      const toAirtableFields = (obj) => {
+        const out = {};
+        Object.entries(obj || {}).forEach(([semantic, val]) => {
+          const fieldName = mapField(semantic);
+          if (!fieldName) return;
+          if (val === undefined) return;
+          // Airtable singleSelect/date fields do not accept "" (must be a choice or null).
+          // Keep this on semantics (not actual field names) so mapping still works.
+          if (val === "" && SINGLE_SELECT_SEMANTICS.has(semantic)) out[fieldName] = null;
+          else if (val === "" && DATE_SEMANTICS.has(semantic)) out[fieldName] = null;
+          else if (val === "" && NULL_IF_EMPTY_SEMANTICS.has(semantic)) out[fieldName] = null;
+          else out[fieldName] = val;
+        });
+        return out;
+      };
+      const getField = (rec, semantic, fallback = null) => {
+        const name = mapField(semantic);
+        return rec?.fields?.[name] ?? fallback;
+      };
+      const toNumber = (v) => {
+        if (v === undefined || v === null) return null;
+        const s = String(v).trim();
+        if (!s) return null;
+        const n = Number(s);
+        return Number.isFinite(n) ? n : null;
+      };
+      const toDateISO = (v) => {
+        if (!v) return null;
+        const d = new Date(v);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+      };
+      const addDays = (iso, days) => {
+        if (!iso) return null;
+        const d = new Date(iso);
+        if (isNaN(d.getTime())) return null;
+        d.setDate(d.getDate() + days);
+        return d.toISOString().split("T")[0];
+      };
+	      const convertUnits = (value, unit) => {
+	        const num = Number(value);
+	        if (!Number.isFinite(num)) return { cm: null, inch: null };
+	        if (unit === "in") {
+	          return { cm: +(num * 2.54).toFixed(2), inch: num };
+	        }
+	        return { cm: num, inch: +(num / 2.54).toFixed(2) };
+	      };
+
+	      function parseNotesAndSpecs(rawNotes) {
+	        const text = String(rawNotes || "");
+	        const start = text.indexOf(SPECS_BLOCK_START);
+	        const end = text.indexOf(SPECS_BLOCK_END);
+	        if (start === -1 || end === -1 || end < start) {
+	          return { specs: null, notes: text.trim() };
+	        }
+	        const before = text.slice(0, start);
+	        const jsonText = text.slice(start + SPECS_BLOCK_START.length, end).trim();
+	        const after = text.slice(end + SPECS_BLOCK_END.length);
+	        let specs = null;
+	        try {
+	          const parsed = JSON.parse(jsonText);
+	          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) specs = parsed;
+	        } catch (_) { }
+	        const notes = `${before}\n${after}`.trim();
+	        return { specs, notes };
+	      }
+
+	      function pruneSpecs(obj) {
+	        if (!obj || typeof obj !== "object" || Array.isArray(obj)) return null;
+	        const out = {};
+	        Object.entries(obj).forEach(([k, v]) => {
+	          const key = String(k || "").trim();
+	          if (!key) return;
+	          if (v === undefined || v === null) return;
+	          if (typeof v === "string") {
+	            const s = v.trim();
+	            if (!s) return;
+	            out[key] = s;
+	            return;
+	          }
+	          if (typeof v === "number") {
+	            if (!Number.isFinite(v)) return;
+	            out[key] = v;
+	            return;
+	          }
+	          if (typeof v === "boolean") {
+	            out[key] = v;
+	            return;
+	          }
+	          // Keep nested objects/arrays as-is (advanced usage).
+	          out[key] = v;
+	        });
+	        return Object.keys(out).length ? out : null;
+	      }
+
+	      function buildNotesWithSpecs(notesText, specsObj) {
+	        const notes = String(notesText || "").trim();
+	        const clean = pruneSpecs(specsObj);
+	        if (!clean) return notes;
+	        const keys = Object.keys(clean).filter(k => k !== "category");
+	        const cat = String(clean.category || "").trim();
+	        if (!keys.length && (!cat || cat === "Other")) return notes;
+	        const json = JSON.stringify(clean, null, 2);
+	        return `${SPECS_BLOCK_START}\n${json}\n${SPECS_BLOCK_END}${notes ? `\n\n${notes}` : ""}`;
+	      }
+
+	      function getTemplateForCategory(category) {
+	        const cat = String(category || "").trim();
+	        const tpl = itemTemplates?.[cat] || itemTemplates?.Other || DEFAULT_ITEM_TEMPLATES.Other;
+	        const fields = Array.isArray(tpl?.fields) ? tpl.fields : [];
+	        return { category: cat || "Other", fields };
+	      }
+
+	      function parseSpecValue(raw, type) {
+	        const s = String(raw ?? "").trim();
+	        if (!s) return null;
+	        if (type === "number") {
+	          const n = toNumber(s);
+	          return n === null ? null : n;
+	        }
+	        return s;
+	      }
+
+	      function parseCustomSpecValue(raw) {
+	        const s = String(raw ?? "").trim();
+	        if (!s) return null;
+	        // Convert pure numbers to numbers; keep everything else as string (e.g., "92x64x32 in").
+	        if (/^[+-]?\d+(\.\d+)?$/.test(s)) {
+	          const n = Number(s);
+	          return Number.isFinite(n) ? n : s;
+	        }
+	        return s;
+	      }
+
+	      function renderSpecsEditor(container, category, specs, opts = {}) {
+	        if (!container) return;
+	        const template = getTemplateForCategory(category);
+	        const tplKeys = new Set(template.fields.map(f => f.key));
+	        const current = (specs && typeof specs === "object" && !Array.isArray(specs)) ? specs : {};
+	        const custom = Object.keys(current)
+	          .filter(k => k !== "category" && !tplKeys.has(k))
+	          .sort((a, b) => a.localeCompare(b))
+	          .map(k => ({ key: k, value: current[k] }));
+
+	        const hint = opts.hint || `Stored inside the Notes field (syncs via Airtable).`;
+	        const fieldsHtml = template.fields.map(f => {
+	          const key = String(f.key);
+	          const label = String(f.label || key);
+	          const type = String(f.type || "text");
+	          const val = current[key] ?? "";
+	          if (type === "select") {
+	            const options = Array.isArray(f.options) ? f.options : [];
+	            return `
+	              <div style="min-width:170px;">
+	                <label>${escapeHtml(label)}</label>
+	                <select data-spec-key="${escapeHtml(key)}" data-spec-type="select">
+	                  <option value="">—</option>
+	                  ${options.map(o => {
+	                    const selected = String(o) === String(val) ? "selected" : "";
+	                    return `<option ${selected}>${escapeHtml(o)}</option>`;
+	                  }).join("")}
+	                </select>
+	              </div>
+	            `;
+	          }
+	          if (type === "number") {
+	            return `
+	              <div style="min-width:170px;">
+	                <label>${escapeHtml(label)}</label>
+	                <input data-spec-key="${escapeHtml(key)}" data-spec-type="number" type="number" step="0.01" value="${escapeHtml(val ?? "")}" />
+	              </div>
+	            `;
+	          }
+	          const placeholder = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : "";
+	          return `
+	            <div style="min-width:170px;">
+	              <label>${escapeHtml(label)}</label>
+	              <input data-spec-key="${escapeHtml(key)}" data-spec-type="text" type="text" value="${escapeHtml(val ?? "")}"${placeholder} />
+	            </div>
+	          `;
+	        }).join("");
+
+	        const customRows = custom.map((row, idx) => `
+	          <div class="row" data-custom-row style="gap:8px; align-items:flex-end; margin-top:6px;">
+	            <div>
+	              <label>Key</label>
+	              <input data-custom-key type="text" value="${escapeHtml(row.key)}" style="width:160px;" />
+	            </div>
+	            <div class="grow">
+	              <label>Value</label>
+	              <input data-custom-value type="text" value="${escapeHtml(row.value ?? "")}" style="width:100%;" />
+	            </div>
+	            <button class="ghost" data-action="removeCustomSpec" data-custom-idx="${idx}">Remove</button>
+	          </div>
+	        `).join("");
+
+	        container.innerHTML = `
+	          <div class="card" style="margin:0; background:#f8fafc;">
+	            <div class="row" style="justify-content:space-between; align-items:center;">
+	              <strong>Specs</strong>
+	              <span class="small light">${escapeHtml(hint)}</span>
+	            </div>
+	            ${fieldsHtml ? `<div class="row" style="margin-top:8px;">${fieldsHtml}</div>` : `<div class="small light" style="margin-top:6px;">No preset fields for this category.</div>`}
+	            <div style="margin-top:10px;">
+	              <div class="row" style="justify-content:space-between; align-items:center;">
+	                <div class="small light">Custom specs</div>
+	                <button class="secondary" data-action="addCustomSpec">+ custom spec</button>
+	              </div>
+	              <div data-custom-list>${customRows || `<div class="small light" style="margin-top:6px;">None</div>`}</div>
+	            </div>
+	          </div>
+	        `;
+
+	        const list = container.querySelector("[data-custom-list]");
+	        container.onclick = (e) => {
+	          const btn = e.target?.closest("[data-action]");
+	          if (!btn) return;
+	          const action = btn.getAttribute("data-action");
+	          if (action === "addCustomSpec") {
+	            if (!list) return;
+	            const row = document.createElement("div");
+	            row.className = "row";
+	            row.setAttribute("data-custom-row", "1");
+	            row.style.gap = "8px";
+	            row.style.alignItems = "flex-end";
+	            row.style.marginTop = "6px";
+	            row.innerHTML = `
+	              <div>
+	                <label>Key</label>
+	                <input data-custom-key type="text" value="" style="width:160px;" />
+	              </div>
+	              <div class="grow">
+	                <label>Value</label>
+	                <input data-custom-value type="text" value="" style="width:100%;" />
+	              </div>
+	              <button class="ghost" data-action="removeCustomSpec">Remove</button>
+	            `;
+	            const none = list.querySelector(".small.light");
+	            if (none) none.remove();
+	            list.appendChild(row);
+	            row.querySelector("[data-custom-key]")?.focus();
+	          } else if (action === "removeCustomSpec") {
+	            const row = btn.closest("[data-custom-row]");
+	            if (row) row.remove();
+	            if (list && !list.querySelector("[data-custom-row]")) {
+	              list.innerHTML = `<div class="small light" style="margin-top:6px;">None</div>`;
+	            }
+	          }
+	        };
+	      }
+
+	      function collectSpecsFromEditor(container, category) {
+	        const cat = String(category || "").trim() || "Other";
+	        const specs = { category: cat };
+	        if (!container) return specs;
+	        container.querySelectorAll("[data-spec-key]").forEach(inp => {
+	          const key = inp.getAttribute("data-spec-key");
+	          const type = inp.getAttribute("data-spec-type") || "text";
+	          if (!key) return;
+	          const raw = inp.value;
+	          const val = parseSpecValue(raw, type);
+	          if (val === null) return;
+	          specs[key] = val;
+	        });
+	        container.querySelectorAll("[data-custom-row]").forEach(row => {
+	          const k = row.querySelector("[data-custom-key]")?.value || "";
+	          const v = row.querySelector("[data-custom-value]")?.value || "";
+	          const key = String(k).trim();
+	          if (!key || key === "category") return;
+	          const val = parseCustomSpecValue(v);
+	          if (val === null) return;
+	          specs[key] = val;
+	        });
+	        return specs;
+	      }
+
+	      const normalizeRoom = (room) => {
+	        if (!room) return "";
+	        const trimmed = String(room).trim();
+	        const match = ROOM_OPTIONS.find(r => r.toLowerCase() === trimmed.toLowerCase());
+        return match || trimmed;
+      };
+
+      function showGlobalError(message) {
+        const box = el("globalError");
+        if (!box) return;
+        if (!message) {
+          box.innerHTML = "";
+          return;
+        }
+        box.innerHTML = `<div class="error-banner">${escapeHtml(message)}</div>`;
+      }
+
+      function showInlineMsg(targetId, text, isError = false) {
+        const target = el(targetId);
+        if (!target) return;
+        target.textContent = text;
+        target.style.color = isError ? "#b91c1c" : "#166534";
+      }
+
+      // --- Airtable wrappers ---
+      async function airtableFetch(url, options) {
+        let res;
+        try {
+          res = await fetch(url, options);
+        } catch (err) {
+          throw new Error("Network error: " + err.message);
+        }
+        let data = {};
+        try {
+          data = await res.json();
+        } catch (_) { }
+        if (!res.ok) {
+          const type = data?.error?.type || "";
+          const msg = data?.error?.message || "";
+          const detail = (type && msg) ? `${type}: ${msg}` : (msg || type || `HTTP ${res.status}`);
+          throw new Error(detail);
+        }
+        return data;
+      }
+
+      async function listRecords() {
+        let url = `${API_BASE}?pageSize=100`;
+        const all = [];
+        let offset = null;
+        do {
+          const pageUrl = offset ? `${url}&offset=${offset}` : url;
+          const data = await airtableFetch(pageUrl, { headers: HEADERS });
+          (data.records || []).forEach(r => all.push(r));
+          offset = data.offset;
+        } while (offset);
+        return all;
+      }
+
+      const OMITTED_WRITE_FIELDS = new Set(); // actual Airtable field names (after mapping)
+
+      function parseUnknownFieldName(message) {
+        const msg = String(message || "");
+        const match = msg.match(/Unknown field name:\s*\"?([^\"\n]+)\"?/i);
+        return match ? match[1] : null;
+      }
+
+      function stripOmittedFields(fields) {
+        const out = {};
+        Object.entries(fields || {}).forEach(([k, v]) => {
+          if (OMITTED_WRITE_FIELDS.has(k)) return;
+          out[k] = v;
+        });
+        return out;
+      }
+
+      async function airtableWrite(method, url, fields) {
+        const protectedFields = new Set([mapField("Record Type"), mapField("Title")]);
+        const omittedThisWrite = new Set();
+        let attempts = 0;
+        while (true) {
+          const payloadFields = stripOmittedFields(fields);
+          try {
+            const data = await airtableFetch(url, {
+              method,
+              headers: HEADERS,
+              body: JSON.stringify({ fields: payloadFields })
+            });
+            return { data, omitted: [...omittedThisWrite] };
+          } catch (err) {
+            const unknown = parseUnknownFieldName(err.message);
+            if (unknown && protectedFields.has(unknown)) {
+              throw new Error(
+                `Missing required Airtable column "${unknown}" (mapped from Record Type/Title). Open Field mapping to correct it, or create the column in Airtable.`
+              );
+            }
+            if (unknown && !protectedFields.has(unknown) && attempts < 10) {
+              OMITTED_WRITE_FIELDS.add(unknown);
+              omittedThisWrite.add(unknown);
+              attempts += 1;
+              continue;
+            }
+            throw err;
+          }
+        }
+      }
+
+      async function createRecord(fields) {
+        return airtableWrite("POST", API_BASE, fields);
+      }
+
+	      async function updateRecord(id, fields) {
+	        return airtableWrite("PATCH", `${API_BASE}/${encodeURIComponent(id)}`, fields);
+	      }
+
+	      async function deleteRecord(id) {
+	        const url = `${API_BASE}/${encodeURIComponent(id)}`;
+	        const data = await airtableFetch(url, { method: "DELETE", headers: HEADERS });
+	        return data;
+	      }
+
+	      // --- Schema check via Metadata API ---
+	      async function fetchTableMetadata() {
+	        const url = `https://api.airtable.com/v0/meta/bases/${encodeURIComponent(cfg.BASE_ID)}/tables`;
+	        const data = await airtableFetch(url, { headers: HEADERS });
+	        const table = (data.tables || []).find(t => t.id === cfg.TABLE_ID || t.name === cfg.TABLE_ID) || (data.tables || [])[0];
+	        if (!table) throw new Error("Table not found in metadata response.");
+	        return table;
+	      }
+
+	      // --- Item templates (local UI presets) ---
+	      function sanitizeTemplatesInput(input) {
+	        const out = JSON.parse(JSON.stringify(DEFAULT_ITEM_TEMPLATES));
+	        if (!input || typeof input !== "object" || Array.isArray(input)) return out;
+	        Object.entries(input).forEach(([cat, tpl]) => {
+	          const category = String(cat || "").trim();
+	          if (!category) return;
+	          if (!tpl || typeof tpl !== "object" || Array.isArray(tpl)) return;
+	          const fields = Array.isArray(tpl.fields) ? tpl.fields : [];
+	          out[category] = { fields: [] };
+	          fields.forEach(f => {
+	            if (!f || typeof f !== "object") return;
+	            const key = String(f.key || "").trim();
+	            const label = String(f.label || key || "").trim();
+	            if (!key || !label) return;
+	            const typeRaw = String(f.type || "text").trim().toLowerCase();
+	            const type = (typeRaw === "number" || typeRaw === "select" || typeRaw === "text") ? typeRaw : "text";
+	            const placeholder = f.placeholder ? String(f.placeholder) : "";
+	            const options = Array.isArray(f.options) ? f.options.map(o => String(o)).filter(Boolean) : null;
+	            out[category].fields.push({
+	              key,
+	              label,
+	              type,
+	              ...(placeholder ? { placeholder } : {}),
+	              ...(type === "select" && options ? { options } : {})
+	            });
+	          });
+	        });
+	        if (!out.Other) out.Other = { fields: [] };
+	        return out;
+	      }
+
+	      function loadItemTemplates() {
+	        try {
+	          const raw = localStorage.getItem("furnishingItemTemplates");
+	          if (!raw) return JSON.parse(JSON.stringify(DEFAULT_ITEM_TEMPLATES));
+	          const parsed = JSON.parse(raw);
+	          return sanitizeTemplatesInput(parsed);
+	        } catch (_) {
+	          return JSON.parse(JSON.stringify(DEFAULT_ITEM_TEMPLATES));
+	        }
+	      }
+
+	      function saveItemTemplates() {
+	        localStorage.setItem("furnishingItemTemplates", JSON.stringify(itemTemplates));
+	      }
+
+	      function getCategoryList() {
+	        const keys = Object.keys(itemTemplates || {});
+	        const base = DEFAULT_ITEM_CATEGORY_ORDER.filter(k => keys.includes(k));
+	        const rest = keys.filter(k => !base.includes(k)).sort((a, b) => a.localeCompare(b));
+	        const all = [...base, ...rest];
+	        if (!all.includes("Other")) all.push("Other");
+	        return all;
+	      }
+
+	      function loadAccordionState() {
+	        try {
+	          const raw = localStorage.getItem("furnishingItemsAccordion");
+	          if (!raw) return {};
+	          const parsed = JSON.parse(raw);
+	          return (parsed && typeof parsed === "object" && !Array.isArray(parsed)) ? parsed : {};
+	        } catch (_) {
+	          return {};
+	        }
+	      }
+
+	      function saveAccordionState() {
+	        try {
+	          localStorage.setItem("furnishingItemsAccordion", JSON.stringify(itemsAccordion || {}));
+	        } catch (_) { }
+	      }
+
+	      function applySchemaDrivenMappingFixes(fieldNames) {
+	        if (!Array.isArray(fieldNames) || !fieldNames.length) return { changed: false, notes: [] };
+	        const fieldSet = new Set(fieldNames);
+	        const lowerToActual = new Map();
+        fieldNames.forEach(n => lowerToActual.set(String(n).toLowerCase(), n));
+
+        let changed = false;
+        const notes = [];
+
+        // Fix casing mismatches (e.g., "status" -> "Status") to avoid hard-to-spot 422 errors.
+        Object.keys(DEFAULT_MAPPING).forEach(semantic => {
+          const current = mapField(semantic);
+          if (!current) return;
+          if (fieldSet.has(current)) return;
+          const actual = lowerToActual.get(String(current).toLowerCase());
+          if (actual && fieldSet.has(actual)) {
+            fieldMapping[semantic] = actual;
+            changed = true;
+            notes.push(`${semantic} -> ${actual}`);
+          }
+        });
+
+        // Common typo: "Prioirity"
+        if (fieldSet.has("Prioirity") && !fieldSet.has("Priority") && mapField("Priority") === "Priority") {
+          fieldMapping["Priority"] = "Prioirity";
+          changed = true;
+          notes.push(`Priority -> Prioirity`);
+        }
+
+        if (changed) saveMapping();
+        return { changed, notes };
+      }
+
+      async function runSchemaCheck() {
+        const box = el("schemaBox");
+        if (!box) return;
+        box.classList.remove("hidden");
+        box.innerHTML = "Checking schema...";
+        try {
+          const table = await fetchTableMetadata();
+          airtableFieldNames = (table.fields || []).map(f => f.name);
+          applySchemaDrivenMappingFixes(airtableFieldNames);
+
+          const present = new Set(airtableFieldNames);
+          const recommended = Object.values(DEFAULT_MAPPING);
+          const missing = recommended.filter(name => !present.has(name));
+          const exists = recommended.filter(name => present.has(name));
+          const typoNote = present.has("Prioirity") && !present.has("Priority")
+            ? `<div class="small" style="margin-top:6px; color:#b91c1c;">Found "Prioirity" (typo). Either rename it to "Priority" or map semantic "Priority" -> "Prioirity".</div>`
+            : "";
+          box.innerHTML = `
+            <div class="success-banner" style="margin:0 0 8px;">Schema check complete.</div>
+            <div class="small">Recommended columns missing or needing rename:</div>
+            <ul>${missing.map(m => `<li>${escapeHtml(m)}</li>`).join("") || "<li>None ✓</li>"}</ul>
+            <div class="small">Columns already present:</div>
+            <ul>${exists.map(m => `<li>${escapeHtml(m)}</li>`).join("")}</ul>
+            <div class="small">If you cannot rename columns, use the Field Mapping panel to align to your existing names (e.g., "Listing URL" -> "Link").</div>
+            ${typoNote}
+          `;
+        } catch (err) {
+          box.innerHTML = `<div class="error-banner">Schema check failed: ${escapeHtml(err.message)}. You can still use the mapping panel.</div>`;
+        }
+      }
+
+      // --- Mapping UI ---
+      function sanitizeMappingInput(input) {
+        const out = { ...DEFAULT_MAPPING };
+        Object.entries(input || {}).forEach(([k, v]) => {
+          if (!(k in DEFAULT_MAPPING)) return;
+          if (v === undefined || v === null) return;
+          const trimmed = String(v).trim();
+          if (!trimmed) return;
+          out[k] = trimmed;
+        });
+        return out;
+      }
+
+      function loadMapping() {
+        try {
+          const raw = localStorage.getItem("furnishingFieldMapping");
+          if (!raw) return { ...DEFAULT_MAPPING };
+          const parsed = JSON.parse(raw);
+          return sanitizeMappingInput(parsed);
+        } catch (_) {
+          return { ...DEFAULT_MAPPING };
+        }
+      }
+
+      function saveMapping() {
+        localStorage.setItem("furnishingFieldMapping", JSON.stringify(fieldMapping));
+      }
+
+      function renderMappingTable() {
+        const wrap = el("mappingTableWrap");
+        if (!wrap) return;
+        const fields = Array.isArray(airtableFieldNames) ? airtableFieldNames : null;
+        const fieldSet = fields ? new Set(fields) : null;
+        const rows = Object.keys(DEFAULT_MAPPING).map(key => {
+          const val = fieldMapping[key] || DEFAULT_MAPPING[key] || key;
+          const missing = fieldSet && val && !fieldSet.has(val);
+          return `
+            <tr>
+              <td>${escapeHtml(key)}</td>
+              <td><input class="${missing ? "mapping-missing" : ""}" data-map="${escapeHtml(key)}" type="text" value="${escapeHtml(val)}" style="width:100%;" ${fields ? 'list="airtableFieldsDatalist"' : ""} /></td>
+              <td class="small light">${escapeHtml(DEFAULT_MAPPING[key])}</td>
+            </tr>
+          `;
+        }).join("");
+        const datalist = fields
+          ? `<datalist id="airtableFieldsDatalist">${fields.map(f => `<option value="${escapeHtml(f)}"></option>`).join("")}</datalist>`
+          : "";
+        wrap.innerHTML = `
+          <table class="table-mapping">
+            <thead><tr><th>Semantic field</th><th>Your Airtable column</th><th>Recommended default</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          ${datalist}
+        `;
+        renderMappingDiagnostics();
+      }
+
+      function renderMappingDiagnostics() {
+        const diag = el("mappingDiag");
+        if (!diag) return;
+        const fields = Array.isArray(airtableFieldNames) ? airtableFieldNames : null;
+        if (!fields) {
+          diag.innerHTML = `<span class="light">Tip: click "Load Airtable columns" to validate mapping and avoid typos.</span>`;
+          return;
+        }
+        const fieldSet = new Set(fields);
+        const missing = [];
+        Object.keys(DEFAULT_MAPPING).forEach(semantic => {
+          const col = mapField(semantic);
+          if (!col) return;
+          if (!fieldSet.has(col)) missing.push({ semantic, col });
+        });
+
+        if (!missing.length) {
+          diag.innerHTML = `<span style="color:#166534;">Mapping matches Airtable columns ✓</span>`;
+          return;
+        }
+
+        const parts = missing.slice(0, 10).map(m => `${m.semantic} -> "${m.col}"`);
+        const more = missing.length > 10 ? ` (+${missing.length - 10} more)` : "";
+        let extra = "";
+        // Common typo: "Prioirity"
+        if (fieldSet.has("Prioirity") && !fieldSet.has("Priority")) {
+          extra = `<div class="small light" style="margin-top:4px;">Detected column "Prioirity" (typo). Map semantic "Priority" -> "Prioirity", or rename the column in Airtable.</div>`;
+        }
+        diag.innerHTML = `
+          <div style="color:#b91c1c;">Missing mapped columns: ${escapeHtml(parts.join(", "))}${escapeHtml(more)}</div>
+          ${extra}
+        `;
+      }
+
+      function attachMappingHandlers() {
+        const panel = el("settingsPanel");
+        const btn = el("btnSettings");
+        const closeBtn = el("btnCloseSettings");
+        if (btn) btn.addEventListener("click", () => {
+          renderMappingTable();
+          panel?.classList.toggle("hidden");
+        });
+        if (closeBtn) closeBtn.addEventListener("click", () => panel?.classList.add("hidden"));
+
+        const loadBtn = el("btnLoadAirtableFields");
+        if (loadBtn) loadBtn.addEventListener("click", async () => {
+          const msgEl = el("mappingMsg");
+          if (msgEl) {
+            msgEl.textContent = "Loading...";
+            msgEl.style.color = "";
+          }
+          try {
+            const table = await fetchTableMetadata();
+            airtableFieldNames = (table.fields || []).map(f => f.name);
+            const fixes = applySchemaDrivenMappingFixes(airtableFieldNames);
+            // If columns/mapping changed, clear the runtime omit-list so writes try again.
+            OMITTED_WRITE_FIELDS.clear();
+            renderMappingTable();
+            renderAll();
+            const note = fixes.changed && fixes.notes.length ? ` (applied: ${fixes.notes.join(", ")})` : "";
+            if (msgEl) {
+              msgEl.textContent = `Loaded ${airtableFieldNames.length} columns${note}`;
+              msgEl.style.color = "#166534";
+            }
+          } catch (err) {
+            if (msgEl) {
+              msgEl.textContent = `Load failed: ${err.message}`;
+              msgEl.style.color = "#b91c1c";
+            }
+          }
+        });
+
+        const saveBtn = el("btnSaveMapping");
+        if (saveBtn) saveBtn.addEventListener("click", () => {
+          const inputs = panel.querySelectorAll("[data-map]");
+          inputs.forEach(inp => {
+            const key = inp.getAttribute("data-map");
+            fieldMapping[key] = inp.value.trim() || DEFAULT_MAPPING[key] || key;
+          });
+          saveMapping();
+          OMITTED_WRITE_FIELDS.clear();
+          panel.classList.add("hidden");
+          renderAll();
+        });
+        const resetBtn = el("btnResetMapping");
+        if (resetBtn) resetBtn.addEventListener("click", () => {
+          fieldMapping = { ...DEFAULT_MAPPING };
+          saveMapping();
+          OMITTED_WRITE_FIELDS.clear();
+          renderMappingTable();
+          renderAll();
+        });
+      }
+
+      function refreshAddItemCategoryAndSpecs() {
+        const catSelect = el("iCategory");
+        if (!catSelect) return;
+        const prev = catSelect.value;
+        catSelect.innerHTML = "";
+        const categories = getCategoryList();
+        categories.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c;
+          opt.textContent = c;
+          catSelect.appendChild(opt);
+        });
+        catSelect.value = categories.includes(prev) ? prev : (categories.includes("Other") ? "Other" : categories[0] || "Other");
+        renderSpecsEditor(el("iSpecsWrap"), catSelect.value, { category: catSelect.value }, { hint: "Saved inside Notes when you add the item." });
+      }
+
+      function attachTemplateHandlers() {
+        const toggleBtn = el("btnToggleTemplates");
+        const editor = el("templatesEditor");
+        const textarea = el("templatesJson");
+        const msg = el("templatesMsg");
+        const saveBtn = el("btnSaveTemplates");
+        const resetBtn = el("btnResetTemplates");
+
+        if (toggleBtn) toggleBtn.addEventListener("click", () => {
+          if (!editor || !textarea) return;
+          const visible = !editor.classList.contains("hidden");
+          if (visible) {
+            editor.classList.add("hidden");
+          } else {
+            textarea.value = JSON.stringify(itemTemplates, null, 2);
+            editor.classList.remove("hidden");
+            textarea.focus();
+          }
+        });
+
+        if (saveBtn) saveBtn.addEventListener("click", () => {
+          if (!textarea) return;
+          try {
+            const parsed = JSON.parse(textarea.value || "{}");
+            itemTemplates = sanitizeTemplatesInput(parsed);
+            saveItemTemplates();
+            textarea.value = JSON.stringify(itemTemplates, null, 2);
+            if (msg) {
+              msg.textContent = "Templates saved.";
+              msg.style.color = "#166534";
+            }
+            refreshAddItemCategoryAndSpecs();
+            renderAll();
+          } catch (err) {
+            if (msg) {
+              msg.textContent = "JSON error: " + err.message;
+              msg.style.color = "#b91c1c";
+            }
+          }
+        });
+
+        if (resetBtn) resetBtn.addEventListener("click", () => {
+          itemTemplates = JSON.parse(JSON.stringify(DEFAULT_ITEM_TEMPLATES));
+          saveItemTemplates();
+          if (textarea) textarea.value = JSON.stringify(itemTemplates, null, 2);
+          if (msg) {
+            msg.textContent = "Templates reset to defaults.";
+            msg.style.color = "#166534";
+          }
+          refreshAddItemCategoryAndSpecs();
+          renderAll();
+        });
+      }
+
+      // --- Rendering helpers ---
+      function renderAll() {
+        renderOptionsParentSelect();
+        renderMeasurements();
+        renderItems();
+        renderOptions();
+      }
+
+      function filteredRecords(type) {
+        const typeFilter = el("filterRecordType")?.value || "";
+        const statusFilter = el("filterStatus")?.value || "";
+        return allRecords.filter(r => {
+          const rt = getField(r, "Record Type", "");
+          const status = getField(r, "Status", "");
+          const matchesType = typeFilter ? rt === typeFilter : true;
+          const matchesStatus = statusFilter ? status === statusFilter : true;
+          const matchesSection = type ? rt === type : true;
+          return matchesSection && matchesType && matchesStatus;
+        });
+      }
+
+      function renderMeasurements() {
+        const container = el("measurementsList");
+        if (!container) return;
+        const recs = filteredRecords("Measurement");
+        if (!recs.length) {
+          container.innerHTML = `<div class="small">No measurements yet.</div>`;
+          return;
+        }
+        container.innerHTML = "";
+        const grouped = new Map();
+        recs.forEach(r => {
+          const room = getField(r, "Room", "Unassigned");
+          if (!grouped.has(room)) grouped.set(room, []);
+          grouped.get(room).push(r);
+        });
+        grouped.forEach((list, room) => {
+          const header = document.createElement("div");
+          header.className = "group-header";
+          header.innerHTML = `<span class="pill">${escapeHtml(room)}</span><span class="small light">${list.length} entries</span>`;
+          container.appendChild(header);
+          list.forEach(rec => container.appendChild(renderMeasurementCard(rec)));
+        });
+      }
+
+      function renderMeasurementCard(rec) {
+        const card = document.createElement("div");
+        card.className = "card";
+        const label = getField(rec, "Measure Label") || getField(rec, "Title") || "(untitled)";
+        const val = getField(rec, "Value");
+        const unit = getField(rec, "Unit Entered", "cm");
+        const { cm, inch } = convertUnits(val, unit);
+        const conf = getField(rec, "Confidence", "");
+        const room = getField(rec, "Room", "");
+        const notes = getField(rec, "Notes", "");
+        card.innerHTML = `
+          <div class="row" style="justify-content:space-between; align-items:center;">
+            <div><strong>${escapeHtml(label)}</strong> <span class="badge">${escapeHtml(room)}</span></div>
+            <div class="small light">${escapeHtml(rec.id)}</div>
+          </div>
+          <div class="row" style="margin-top:8px; align-items:center;">
+            <div class="pill">Entered: ${escapeHtml(val ?? "")} ${escapeHtml(unit)}</div>
+            <div class="pill">= ${cm ?? "?"} cm (${inch ?? "?"} in)</div>
+            ${conf ? `<span class="badge">Confidence: ${escapeHtml(conf)}</span>` : ""}
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <div>
+              <label>Value</label>
+              <input data-field="Value" type="number" step="0.01" value="${escapeHtml(val ?? "")}" />
+            </div>
+            <div>
+              <label>Unit</label>
+              <select data-field="Unit Entered">
+                <option value="cm" ${unit === "cm" ? "selected" : ""}>cm</option>
+                <option value="in" ${unit === "in" ? "selected" : ""}>in</option>
+              </select>
+            </div>
+            <div>
+              <label>Confidence</label>
+              <select data-field="Confidence">
+                <option value="">—</option>
+                <option ${conf === "low" ? "selected" : ""}>low</option>
+                <option ${conf === "med" ? "selected" : ""}>med</option>
+                <option ${conf === "high" ? "selected" : ""}>high</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:8px;">
+            <label>Notes</label>
+            <textarea data-field="Notes">${escapeHtml(notes || "")}</textarea>
+          </div>
+	          <div class="row" style="margin-top:8px; align-items:center;">
+	            <button data-action="save">Save</button>
+	            <button class="ghost" data-action="delete">Delete</button>
+	            <span class="small" data-msg></span>
+	          </div>
+	        `;
+	        card.querySelector('[data-action="save"]').addEventListener("click", async () => {
+          const value = toNumber(card.querySelector('[data-field="Value"]').value);
+          const unitVal = card.querySelector('[data-field="Unit Entered"]').value || "cm";
+          const confVal = card.querySelector('[data-field="Confidence"]').value || null;
+          const notesVal = card.querySelector('[data-field="Notes"]').value || "";
+          const { cm, inch } = convertUnits(value, unitVal);
+          const fields = toAirtableFields({
+            "Value": value,
+            "Unit Entered": unitVal,
+            "Value (cm)": cm,
+            "Value (in)": inch,
+            "Confidence": confVal,
+            "Notes": notesVal
+          });
+          const msg = card.querySelector("[data-msg]");
+          msg.textContent = "Saving...";
+          try {
+            const res = await updateRecord(rec.id, fields);
+            const omitted = res?.omitted || [];
+            msg.textContent = omitted.length ? `Saved ✓ (skipped: ${omitted.join(", ")})` : "Saved ✓";
+            await reload(false);
+          } catch (err) {
+            msg.textContent = "Error: " + err.message;
+            msg.style.color = "#b91c1c";
+          }
+	        });
+	        card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+	          const msg = card.querySelector("[data-msg]");
+	          if (!confirm("Delete this measurement from Airtable?")) return;
+	          msg.textContent = "Deleting...";
+	          try {
+	            await deleteRecord(rec.id);
+	            msg.textContent = "Deleted ✓";
+	            await reload(false);
+	          } catch (err) {
+	            msg.textContent = "Error: " + err.message;
+	            msg.style.color = "#b91c1c";
+	          }
+	        });
+	        return card;
+	      }
+
+	      function renderItems() {
+	        const container = el("itemsList");
+	        if (!container) return;
+	        const recs = filteredRecords("Item");
+	        if (!recs.length) {
+	          container.innerHTML = `<div class="small">No items yet.</div>`;
+	          return;
+	        }
+	        container.innerHTML = "";
+	        const roomGroups = new Map();
+	        recs.forEach(r => {
+	          const room = getField(r, "Room", "Unassigned");
+	          if (!roomGroups.has(room)) roomGroups.set(room, []);
+	          roomGroups.get(room).push(r);
+	        });
+
+	        const roomOrder = [...roomGroups.keys()].sort((a, b) => a.localeCompare(b));
+	        roomOrder.forEach(room => {
+	          const list = roomGroups.get(room) || [];
+	          const roomKey = `room:${room}`;
+	          const open = itemsAccordion?.[roomKey] !== false;
+
+	          const header = document.createElement("div");
+	          header.className = "group-header";
+	          header.style.cursor = "pointer";
+	          header.innerHTML = `
+	            <span class="mono">${open ? "[-]" : "[+]"}</span>
+	            <span class="pill">${escapeHtml(room)}</span>
+	            <span class="small light">${list.length} items</span>
+	          `;
+	          header.addEventListener("click", () => {
+	            itemsAccordion[roomKey] = !(itemsAccordion?.[roomKey] !== false);
+	            saveAccordionState();
+	            renderItems();
+	          });
+	          container.appendChild(header);
+
+	          const roomBody = document.createElement("div");
+	          if (!open) roomBody.classList.add("hidden");
+	          container.appendChild(roomBody);
+
+	          // Group within room by item category (stored in specs block inside Notes).
+	          const catGroups = new Map();
+	          list.forEach(itemRec => {
+	            const p = parseNotesAndSpecs(getField(itemRec, "Notes", ""));
+	            const cat = String(p?.specs?.category || "").trim() || "Other";
+	            if (!catGroups.has(cat)) catGroups.set(cat, []);
+	            catGroups.get(cat).push(itemRec);
+	          });
+
+	          const catOrder = [...catGroups.keys()].sort((a, b) => {
+	            const ia = DEFAULT_ITEM_CATEGORY_ORDER.indexOf(a);
+	            const ib = DEFAULT_ITEM_CATEGORY_ORDER.indexOf(b);
+	            const ra = ia === -1 ? 999 : ia;
+	            const rb = ib === -1 ? 999 : ib;
+	            if (ra !== rb) return ra - rb;
+	            return a.localeCompare(b);
+	          });
+
+	          catOrder.forEach(cat => {
+	            const catList = catGroups.get(cat) || [];
+	            const catKey = `room:${room}|cat:${cat}`;
+	            const catOpen = itemsAccordion?.[catKey] !== false;
+
+	            const catHeader = document.createElement("div");
+	            catHeader.className = "group-header";
+	            catHeader.style.cursor = "pointer";
+	            catHeader.style.marginLeft = "10px";
+	            catHeader.innerHTML = `
+	              <span class="mono">${catOpen ? "[-]" : "[+]"}</span>
+	              <span class="pill">${escapeHtml(cat)}</span>
+	              <span class="small light">${catList.length}</span>
+	            `;
+	            catHeader.addEventListener("click", () => {
+	              itemsAccordion[catKey] = !(itemsAccordion?.[catKey] !== false);
+	              saveAccordionState();
+	              renderItems();
+	            });
+	            roomBody.appendChild(catHeader);
+
+	            const catBody = document.createElement("div");
+	            if (!catOpen) catBody.classList.add("hidden");
+	            catBody.style.marginLeft = "10px";
+	            roomBody.appendChild(catBody);
+
+	            catList.sort((a, b) => (toNumber(getField(a, "Priority")) ?? 99) - (toNumber(getField(b, "Priority")) ?? 99));
+	            catList.forEach(itemRec => catBody.appendChild(renderItemCard(itemRec)));
+	          });
+	        });
+	      }
+
+      function renderItemCard(rec) {
+        const card = document.createElement("div");
+        card.className = "card";
+        const title = getField(rec, "Title") || "(untitled)";
+        const room = getField(rec, "Room", "");
+        const status = getField(rec, "Status", "Idea");
+        const priority = getField(rec, "Priority", "");
+        const link = getField(rec, "Link", "");
+        const budget = getField(rec, "Budget Target", "");
+        const price = getField(rec, "Price", "");
+        const qty = getField(rec, "Quantity", 1);
+        const notesRaw = getField(rec, "Notes", "");
+        const parsed = parseNotesAndSpecs(notesRaw);
+        const specsRaw = parsed.specs || {};
+        const freeNotes = parsed.notes || "";
+        const categoryFromSpecs = String(specsRaw?.category || "").trim();
+        const category = categoryFromSpecs || "Other";
+        const selectedOpt = getField(rec, "Selected Option Id", "");
+
+        const optionsForItem = allRecords.filter(r => getField(r, "Record Type") === "Option" && (getField(r, "Parent Item Record Id") === rec.id || getField(r, "Parent Item Key") === title));
+
+        card.innerHTML = `
+          <div class="row" style="justify-content:space-between; align-items:flex-start;">
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              <span class="badge">${escapeHtml(room)}</span>
+              <span class="pill">${escapeHtml(category)}</span>
+              ${priority ? `<span class="priority-pill">P${escapeHtml(priority)}</span>` : ""}
+            </div>
+            <div class="small light mono">${escapeHtml(rec.id)}</div>
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <div>
+              <label>Status</label>
+              <select data-field="Status"></select>
+            </div>
+            <div>
+              <label>Category</label>
+              <select data-field="Category"></select>
+            </div>
+            <div>
+              <label>Priority</label>
+              <input data-field="Priority" type="number" min="1" max="5" value="${escapeHtml(priority ?? "")}" />
+            </div>
+            <div>
+              <label>Budget target</label>
+              <input data-field="Budget Target" type="number" step="0.01" value="${escapeHtml(budget ?? "")}" />
+            </div>
+            <div>
+              <label>Price</label>
+              <input data-field="Price" type="number" step="0.01" value="${escapeHtml(price ?? "")}" />
+            </div>
+            <div>
+              <label>Quantity</label>
+              <input data-field="Quantity" type="number" step="1" value="${escapeHtml(qty ?? 1)}" />
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <div class="grow">
+              <label>Link</label>
+              <input data-field="Link" type="text" value="${escapeHtml(link)}" style="width:100%;" />
+            </div>
+            <div class="grow">
+              <label>Notes</label>
+              <textarea data-field="Notes" style="width:100%; height:60px;">${escapeHtml(freeNotes)}</textarea>
+            </div>
+          </div>
+          <div data-specs style="margin-top:10px;"></div>
+          <div class="row" style="margin-top:8px; align-items:center;">
+            <button data-action="save">Save</button>
+            <button class="ghost" data-action="delete">Delete</button>
+            <span class="small" data-msg></span>
+            <span class="small light">Selected option: ${selectedOpt ? escapeHtml(selectedOpt) : "—"}</span>
+            ${optionsForItem.length ? `<button class="secondary" data-action="toggleOptions">Show ${optionsForItem.length} option(s)</button>` : ""}
+          </div>
+          <div data-options class="hidden" style="margin-top:8px;"></div>
+        `;
+
+        // status select options
+        const statusSelect = card.querySelector('select[data-field="Status"]');
+        ITEM_STATUSES.forEach(s => {
+          const opt = document.createElement("option");
+          opt.value = s;
+          opt.textContent = s;
+          if (s === status) opt.selected = true;
+          statusSelect.appendChild(opt);
+        });
+
+        // category select options
+        const categorySelect = card.querySelector('select[data-field="Category"]');
+        const categories = getCategoryList();
+        if (!categories.includes(category)) categories.unshift(category);
+        categories.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c;
+          opt.textContent = c;
+          if (c === category) opt.selected = true;
+          categorySelect.appendChild(opt);
+        });
+
+        // specs editor (stored inside Notes)
+        const specsWrap = card.querySelector("[data-specs]");
+        renderSpecsEditor(specsWrap, category, { ...specsRaw, category }, { hint: "Stored inside Notes for collaboration." });
+        categorySelect.addEventListener("change", () => {
+          const nextCat = categorySelect.value || "Other";
+          const currentSpecs = collectSpecsFromEditor(specsWrap, nextCat);
+          currentSpecs.category = nextCat;
+          renderSpecsEditor(specsWrap, nextCat, currentSpecs, { hint: "Stored inside Notes for collaboration." });
+        });
+
+        card.querySelector('[data-action="save"]').addEventListener("click", async () => {
+          const cat = categorySelect.value || "Other";
+          const specs = collectSpecsFromEditor(specsWrap, cat);
+          specs.category = cat;
+          const notesCombined = buildNotesWithSpecs(card.querySelector('textarea[data-field="Notes"]').value, specs);
+          const fields = toAirtableFields({
+            "Status": card.querySelector('select[data-field="Status"]').value,
+            "Priority": toNumber(card.querySelector('input[data-field="Priority"]').value),
+            "Budget Target": toNumber(card.querySelector('input[data-field="Budget Target"]').value),
+            "Price": toNumber(card.querySelector('input[data-field="Price"]').value),
+            "Quantity": toNumber(card.querySelector('input[data-field="Quantity"]').value) ?? 1,
+            "Link": card.querySelector('input[data-field="Link"]').value,
+            "Notes": notesCombined
+          });
+          const msg = card.querySelector("[data-msg]");
+          msg.textContent = "Saving...";
+          try {
+            const res = await updateRecord(rec.id, fields);
+            const omitted = res?.omitted || [];
+            msg.textContent = omitted.length ? `Saved ✓ (skipped: ${omitted.join(", ")})` : "Saved ✓";
+            await reload(false);
+          } catch (err) {
+            msg.textContent = "Error: " + err.message;
+            msg.style.color = "#b91c1c";
+          }
+        });
+
+        card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+          const msg = card.querySelector("[data-msg]");
+          if (!confirm("Delete this item from Airtable?")) return;
+          msg.textContent = "Deleting...";
+          try {
+            await deleteRecord(rec.id);
+            msg.textContent = "Deleted ✓";
+            await reload(false);
+          } catch (err) {
+            msg.textContent = "Error: " + err.message;
+            msg.style.color = "#b91c1c";
+          }
+        });
+
+        const toggleBtn = card.querySelector('[data-action="toggleOptions"]');
+        if (toggleBtn) {
+          const optDiv = card.querySelector("[data-options]");
+          toggleBtn.addEventListener("click", () => {
+            const visible = !optDiv.classList.contains("hidden");
+            if (visible) {
+              optDiv.classList.add("hidden");
+              toggleBtn.textContent = `Show ${optionsForItem.length} option(s)`;
+            } else {
+              optDiv.classList.remove("hidden");
+              toggleBtn.textContent = "Hide options";
+              renderOptionsListForItem(optionsForItem, rec, optDiv);
+            }
+          });
+        }
+        return card;
+      }
+
+      function renderOptionsListForItem(options, parentRec, container) {
+        container.innerHTML = "";
+        if (!options.length) {
+          container.innerHTML = `<div class="small">No options linked yet.</div>`;
+          return;
+        }
+        options.forEach(opt => {
+          container.appendChild(renderOptionCard(opt, parentRec));
+        });
+      }
+
+      function renderOptionsParentSelect() {
+        const sel = el("oParent");
+        if (!sel) return;
+        sel.innerHTML = "";
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Choose item…";
+        sel.appendChild(placeholder);
+        const items = allRecords.filter(r => getField(r, "Record Type") === "Item");
+        items.forEach(r => {
+          const opt = document.createElement("option");
+          opt.value = r.id;
+          const title = getField(r, "Title") || r.id;
+          opt.textContent = `${title} (${getField(r, "Room", "") || "No room"})`;
+          sel.appendChild(opt);
+        });
+      }
+
+      function renderOptions() {
+        const container = el("optionsList");
+        if (!container) return;
+        const recs = filteredRecords("Option");
+        if (!recs.length) {
+          container.innerHTML = `<div class="small">No options yet.</div>`;
+          return;
+        }
+        container.innerHTML = "";
+        const grouped = new Map();
+        recs.forEach(r => {
+          const parentId = getField(r, "Parent Item Record Id") || getField(r, "Parent Item Key") || "Unlinked";
+          if (!grouped.has(parentId)) grouped.set(parentId, []);
+          grouped.get(parentId).push(r);
+        });
+        grouped.forEach((list, key) => {
+          const header = document.createElement("div");
+          header.className = "group-header";
+          header.innerHTML = `<span class="pill">Parent: ${escapeHtml(key)}</span><span class="small light">${list.length} option(s)</span>`;
+          container.appendChild(header);
+          list.forEach(opt => container.appendChild(renderOptionCard(opt)));
+        });
+      }
+
+	      function renderOptionCard(rec, parentRec = null) {
+	        const card = document.createElement("div");
+	        card.className = "card";
+	        const title = getField(rec, "Title") || getField(rec, "Store") || "(option)";
+	        const store = getField(rec, "Store", "");
+	        const link = getField(rec, "Link", "");
+	        const notes = getField(rec, "Notes", "");
+	        const promo = getField(rec, "Promo Code", "");
+	        const discount = toNumber(getField(rec, "Discount")) ?? 0;
+	        const shipping = toNumber(getField(rec, "Shipping")) ?? 0;
+	        const tax = toNumber(getField(rec, "Tax Estimate")) ?? 0;
+	        const price = toNumber(getField(rec, "Price")) ?? 0;
+        const finalTotal = (price - discount + shipping + tax);
+        const dim = getField(rec, "Dimensions", "");
+        const parentId = getField(rec, "Parent Item Record Id") || "";
+        const parentKey = getField(rec, "Parent Item Key") || "";
+
+        card.innerHTML = `
+          <div class="row" style="justify-content:space-between; align-items:flex-start;">
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              ${store ? `<span class="badge">${escapeHtml(store)}</span>` : ""}
+              ${link ? `<a class="inline-link" href="${escapeHtml(link)}" target="_blank" rel="noreferrer noopener">Open</a>` : ""}
+            </div>
+            <div class="small light mono">${escapeHtml(rec.id)}</div>
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <div><label>Price</label><input data-field="Price" type="number" step="0.01" value="${escapeHtml(price ?? "")}" /></div>
+            <div><label>Discount</label><input data-field="Discount" type="number" step="0.01" value="${escapeHtml(discount ?? "")}" /></div>
+            <div><label>Shipping</label><input data-field="Shipping" type="number" step="0.01" value="${escapeHtml(shipping ?? "")}" /></div>
+            <div><label>Tax</label><input data-field="Tax Estimate" type="number" step="0.01" value="${escapeHtml(tax ?? "")}" /></div>
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <div class="grow"><label>Store</label><input data-field="Store" type="text" value="${escapeHtml(store)}" style="width:100%;" /></div>
+            <div class="grow"><label>Link</label><input data-field="Link" type="text" value="${escapeHtml(link)}" style="width:100%;" /></div>
+          </div>
+	          <div class="row" style="margin-top:6px;">
+	            <div><label>Promo code</label><input data-field="Promo Code" type="text" value="${escapeHtml(promo)}" /></div>
+	            <div><label>Dimensions</label><input data-field="Dimensions" type="text" value="${escapeHtml(dim)}" style="width:220px;" /></div>
+	          </div>
+	          <div style="margin-top:6px;">
+	            <label>Notes</label>
+	            <textarea data-field="Notes" style="width:100%; height:60px;">${escapeHtml(notes || "")}</textarea>
+	          </div>
+	          <div class="row" style="margin-top:8px; align-items:center; gap:12px;">
+	            <span class="option-total">Final total: ${finalTotal.toFixed(2)}</span>
+	            <span class="small light">Parent ID: ${escapeHtml(parentId || parentKey || "—")}</span>
+	          </div>
+	          <div class="row" style="margin-top:8px; align-items:center;">
+	            <button data-action="save">Save option</button>
+	            ${parentRec ? `<button class="secondary" data-action="select">Select option for item</button>` : ""}
+	            <button class="ghost" data-action="delete">Delete</button>
+	            <span class="small" data-msg></span>
+	          </div>
+	        `;
+
+	        card.querySelector('[data-action="save"]').addEventListener("click", async () => {
+	          const fields = toAirtableFields({
+            "Price": toNumber(card.querySelector('input[data-field="Price"]').value),
+            "Discount": toNumber(card.querySelector('input[data-field="Discount"]').value),
+            "Shipping": toNumber(card.querySelector('input[data-field="Shipping"]').value),
+            "Tax Estimate": toNumber(card.querySelector('input[data-field="Tax Estimate"]').value),
+	            "Store": card.querySelector('input[data-field="Store"]').value,
+	            "Link": card.querySelector('input[data-field="Link"]').value,
+	            "Promo Code": card.querySelector('input[data-field="Promo Code"]').value,
+	            "Dimensions": card.querySelector('input[data-field="Dimensions"]').value,
+	            "Notes": card.querySelector('textarea[data-field="Notes"]').value,
+	            "Final Total": Number((toNumber(card.querySelector('input[data-field="Price"]').value) ?? 0) - (toNumber(card.querySelector('input[data-field="Discount"]').value) ?? 0) + (toNumber(card.querySelector('input[data-field="Shipping"]').value) ?? 0) + (toNumber(card.querySelector('input[data-field="Tax Estimate"]').value) ?? 0)).toFixed(2)
+	          });
+	          const msg = card.querySelector("[data-msg]");
+	          msg.textContent = "Saving...";
+	          try {
+            const res = await updateRecord(rec.id, fields);
+            const omitted = res?.omitted || [];
+            msg.textContent = omitted.length ? `Saved ✓ (skipped: ${omitted.join(", ")})` : "Saved ✓";
+            await reload(false);
+          } catch (err) {
+            msg.textContent = "Error: " + err.message;
+            msg.style.color = "#b91c1c";
+	          }
+	        });
+
+	        card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+	          const msg = card.querySelector("[data-msg]");
+	          if (!confirm("Delete this option from Airtable?")) return;
+	          msg.textContent = "Deleting...";
+	          try {
+	            await deleteRecord(rec.id);
+	            msg.textContent = "Deleted ✓";
+	            await reload(false);
+	          } catch (err) {
+	            msg.textContent = "Error: " + err.message;
+	            msg.style.color = "#b91c1c";
+	          }
+	        });
+
+	        const selectBtn = card.querySelector('[data-action="select"]');
+	        if (selectBtn && parentRec) {
+	          selectBtn.addEventListener("click", async () => {
+	            const fields = toAirtableFields({
+              "Status": "Selected",
+              "Selected Option Id": rec.id,
+              "Price": rec.fields?.[mapField("Final Total")] ?? finalTotal
+            });
+            const msg = card.querySelector("[data-msg]");
+            msg.textContent = "Updating item...";
+            try {
+              const res = await updateRecord(parentRec.id, fields);
+              const omitted = res?.omitted || [];
+              msg.textContent = omitted.length ? `Item updated ✓ (skipped: ${omitted.join(", ")})` : "Item updated ✓";
+              await reload(false);
+            } catch (err) {
+              msg.textContent = "Error: " + err.message;
+              msg.style.color = "#b91c1c";
+            }
+          });
+        }
+        return card;
+      }
+
+      // --- Add handlers ---
+	      function populateStaticSelects() {
+	        const roomSelects = [el("mRoom"), el("iRoom")];
+	        roomSelects.forEach(sel => {
+	          if (!sel) return;
+	          sel.innerHTML = "";
+	          ROOM_OPTIONS.forEach(r => {
+	            const opt = document.createElement("option");
+	            opt.value = r;
+	            opt.textContent = r;
+	            sel.appendChild(opt);
+	          });
+	        });
+
+	        const statusSelect = el("iStatus");
+	        if (statusSelect) {
+	          statusSelect.innerHTML = "";
+	          ITEM_STATUSES.forEach(s => {
+	            const opt = document.createElement("option");
+	            opt.value = s;
+	            opt.textContent = s;
+	            statusSelect.appendChild(opt);
+	          });
+	          statusSelect.value = "Idea";
+	        }
+
+	        const catSelect = el("iCategory");
+	        if (catSelect) {
+	          catSelect.innerHTML = "";
+	          const categories = getCategoryList();
+	          categories.forEach(c => {
+	            const opt = document.createElement("option");
+	            opt.value = c;
+	            opt.textContent = c;
+	            catSelect.appendChild(opt);
+	          });
+	          catSelect.value = categories.includes("Other") ? "Other" : (categories[0] || "Other");
+	        }
+
+	        const specsWrap = el("iSpecsWrap");
+	        if (specsWrap && catSelect) {
+	          renderSpecsEditor(specsWrap, catSelect.value, { category: catSelect.value }, { hint: "Saved inside Notes when you add the item." });
+	        }
+	      }
+
+      async function handleAddMeasurement() {
+        const label = el("mLabel").value.trim();
+        const room = el("mRoom").value;
+        const val = toNumber(el("mValue").value);
+        const unit = el("mUnit").value;
+        const confidence = el("mConfidence").value || null;
+        if (!label || val === null) {
+          showInlineMsg("mAddMsg", "Label and value required.", true);
+          return;
+        }
+        const { cm, inch } = convertUnits(val, unit);
+        const fields = toAirtableFields({
+          "Record Type": "Measurement",
+          "Title": label,
+          "Measure Label": label,
+          "Room": room,
+          "Unit Entered": unit,
+          "Value": val,
+          "Value (cm)": cm,
+          "Value (in)": inch,
+          "Confidence": confidence
+        });
+        showInlineMsg("mAddMsg", "Saving...");
+        try {
+          const res = await createRecord(fields);
+          const omitted = res?.omitted || [];
+          showInlineMsg("mAddMsg", omitted.length ? `Added ✓ (skipped: ${omitted.join(", ")})` : "Added ✓");
+          ["mLabel", "mValue", "mConfidence"].forEach(id => el(id).value = "");
+          await reload(false);
+        } catch (err) {
+          showInlineMsg("mAddMsg", "Error: " + err.message, true);
+        }
+      }
+
+	      async function handleAddItem() {
+	        const title = el("iTitle").value.trim();
+	        if (!title) {
+	          showInlineMsg("iAddMsg", "Title is required.", true);
+	          return;
+	        }
+	        const category = el("iCategory")?.value || "Other";
+	        const specs = collectSpecsFromEditor(el("iSpecsWrap"), category);
+	        specs.category = category;
+	        const notesCombined = buildNotesWithSpecs(el("iNotes").value, specs);
+	        const fields = toAirtableFields({
+	          "Record Type": "Item",
+	          "Title": title,
+	          "Room": el("iRoom").value,
+	          "Status": el("iStatus").value,
+	          "Priority": toNumber(el("iPriority").value),
+	          "Budget Target": toNumber(el("iBudget").value),
+	          "Link": el("iLink").value.trim(),
+	          "Notes": notesCombined,
+	          "Quantity": 1
+	        });
+	        showInlineMsg("iAddMsg", "Saving...");
+	        try {
+	          const res = await createRecord(fields);
+	          const omitted = res?.omitted || [];
+	          showInlineMsg("iAddMsg", omitted.length ? `Added ✓ (skipped: ${omitted.join(", ")})` : "Added ✓");
+	          ["iTitle", "iPriority", "iBudget", "iLink", "iNotes"].forEach(id => el(id).value = "");
+	          renderSpecsEditor(el("iSpecsWrap"), el("iCategory")?.value || "Other", { category: el("iCategory")?.value || "Other" }, { hint: "Saved inside Notes when you add the item." });
+	          await reload(false);
+	        } catch (err) {
+	          showInlineMsg("iAddMsg", "Error: " + err.message, true);
+	        }
+	      }
+
+	      async function handleAddOption() {
+	        const parentId = el("oParent").value;
+	        const store = el("oStore").value.trim();
+	        const link = el("oLink").value.trim();
+	        const price = toNumber(el("oPrice").value) ?? 0;
+	        const discount = toNumber(el("oDiscount").value) ?? 0;
+	        const shipping = toNumber(el("oShipping").value) ?? 0;
+	        const tax = toNumber(el("oTax").value) ?? 0;
+	        const promo = el("oPromo").value.trim();
+	        const dims = el("oDimensions").value.trim();
+	        const notes = el("oNotes").value;
+	        if (!parentId) {
+	          showInlineMsg("oAddMsg", "Select a parent item.", true);
+	          return;
+	        }
+	        const parentItem = allRecords.find(r => r.id === parentId);
+	        const parentTitle = getField(parentItem, "Title", "");
+	        const finalTotal = Number(price - discount + shipping + tax).toFixed(2);
+	        const fields = toAirtableFields({
+	          "Record Type": "Option",
+	          "Parent Item Record Id": parentId,
+	          "Parent Item Key": parentTitle,
+	          "Store": store,
+	          "Link": link,
+	          "Price": price,
+	          "Discount": discount,
+	          "Shipping": shipping,
+	          "Tax Estimate": tax,
+	          "Promo Code": promo,
+	          "Dimensions": dims,
+	          "Final Total": finalTotal,
+	          "Notes": notes,
+	          "Title": store || parentTitle || "Option"
+	        });
+	        showInlineMsg("oAddMsg", "Saving...");
+	        try {
+	          const res = await createRecord(fields);
+	          const omitted = res?.omitted || [];
+	          showInlineMsg("oAddMsg", omitted.length ? `Added ✓ (skipped: ${omitted.join(", ")})` : "Added ✓");
+	          ["oStore", "oLink", "oPrice", "oDiscount", "oShipping", "oTax", "oPromo", "oDimensions", "oNotes"].forEach(id => el(id).value = "");
+	          await reload(false);
+	        } catch (err) {
+	          showInlineMsg("oAddMsg", "Error: " + err.message, true);
+	        }
+	      }
+
+      // --- Import handling ---
+      let importData = null;
+
+      const canonicalRecordType = (val, fallback = null) => {
+        const t = String(val || fallback || "").toLowerCase();
+        if (t.startsWith("meas")) return "Measurement";
+        if (t === "item" || t === "items") return "Item";
+        if (t.startsWith("opt")) return "Option";
+        if (t.startsWith("pur")) return "Purchase";
+        if (t === "note" || t === "notes") return "Note";
+        return fallback ? canonicalRecordType(fallback, null) : null;
+      };
+
+      function normalizeAirtableId(data) {
+        const candidates = [
+          data?.airtableId,
+          data?.airtable_id,
+          data?.recordId,
+          data?.record_id,
+          data?.id
+        ];
+        const found = candidates.find(v => typeof v === "string" && v.trim());
+        if (!found) return null;
+        const s = found.trim();
+        return /^rec[a-zA-Z0-9]{10,}$/.test(s) ? s : null;
+      }
+
+      function buildMeasurement(data) {
+        let valueInput = data.value ?? data.measure ?? data.length ?? data.val;
+        let unitHint = data.unit || data.unit_entered || data.units;
+        if (valueInput === undefined && (data.value_cm ?? data.valueCm)) {
+          valueInput = data.value_cm ?? data.valueCm;
+          unitHint = "cm";
+        }
+        if (valueInput === undefined && (data.value_in ?? data.valueIn)) {
+          valueInput = data.value_in ?? data.valueIn;
+          unitHint = "in";
+        }
+        const value = toNumber(valueInput);
+        if (!Number.isFinite(value)) return null;
+        const unitRaw = (unitHint || "in").toLowerCase();
+        const unit = unitRaw.startsWith("cm") ? "cm" : "in";
+        const { cm, inch } = convertUnits(value, unit);
+        return {
+          "Record Type": "Measurement",
+          "Title": data.title || data.label || data.name || "Measurement",
+          "Measure Label": data.label || data.title || data.name || "",
+          "Room": normalizeRoom(data.room),
+          "Unit Entered": unit,
+          "Value": value,
+          "Value (cm)": cm,
+          "Value (in)": inch,
+          "Confidence": data.confidence || data.certainty || "",
+          "Notes": data.notes || data.comment || ""
+        };
+      }
+
+      function buildItem(data) {
+        const status = data.status || "Idea";
+        const category = String(data.category || data.itemCategory || data.kind || "").trim();
+        const freeNotes = data.notes || data.note || data.comment || "";
+        const extraSpecs = (data.specs && typeof data.specs === "object" && !Array.isArray(data.specs)) ? data.specs : null;
+        const specs = extraSpecs ? { ...extraSpecs } : {};
+        if (category) specs.category = category;
+        const notesCombined = buildNotesWithSpecs(freeNotes, specs);
+        return {
+          "Record Type": "Item",
+          "Title": data.title || data.name || data.comment || "Item",
+          "Room": normalizeRoom(data.room || data.group),
+          "Status": status,
+          "Priority": toNumber(data.priority ?? data.rank),
+          "Link": data.link || data.url || "",
+          "Notes": notesCombined,
+          "Budget Target": toNumber(data.budget ?? data.budget_target),
+          "Price": toNumber(data.price),
+          "Quantity": toNumber(data.quantity) ?? 1,
+          "Selected Option Id": data.selectedOptionId || data.selected_option_id || data.selectedOption || ""
+        };
+      }
+
+      function buildOption(data) {
+        const price = toNumber(data.price) ?? 0;
+        const discount = toNumber(data.discount) ?? 0;
+        const shipping = toNumber(data.shipping) ?? 0;
+        const tax = toNumber(data.tax ?? data.tax_estimate) ?? 0;
+        const total = Number(price - discount + shipping + tax).toFixed(2);
+        return {
+          "Record Type": "Option",
+          "Title": data.title || data.store || "Option",
+          "Parent Item Record Id": data.parentId || data.parent_id || data.parentRecordId || "",
+          "Parent Item Key": data.parentTitle || data.parent || data.parent_key || "",
+          "Store": data.store || "",
+          "Link": data.link || data.url || "",
+          "Promo Code": data.promo || data.promoCode || data.code || "",
+          "Discount": discount,
+          "Shipping": shipping,
+          "Tax Estimate": tax,
+          "Price": price,
+          "Final Total": Number(total),
+          "Dimensions": data.dimensions || data.size || "",
+          "Notes": data.notes || data.note || ""
+        };
+      }
+
+      function buildPurchase(data) {
+        const orderDate = data.orderDate || data.order_date;
+        const returnBy = data.returnBy || data.return_by || addDays(orderDate, 30);
+        const dateOnly = (v) => {
+          const iso = toDateISO(v);
+          return iso ? iso.split("T")[0] : null;
+        };
+        return {
+          "Record Type": "Purchase",
+          "Title": data.title || data.item || "Purchase",
+          "Order Date": dateOnly(orderDate),
+          "Order Number": data.orderNumber || data.order_no || "",
+          "Expected Delivery": dateOnly(data.expectedDelivery || data.expected_delivery),
+          "Actual Delivery": dateOnly(data.actualDelivery || data.actual_delivery),
+          "Return By": dateOnly(returnBy),
+          "Price": toNumber(data.price),
+          "Notes": data.notes || ""
+        };
+      }
+
+      function buildNote(data) {
+        return {
+          "Record Type": "Note",
+          "Title": data.title || data.name || "Note",
+          "Room": normalizeRoom(data.room),
+          "Notes": data.notes || data.body || data.comment || ""
+        };
+      }
+
+      function normalizeImport(raw) {
+        const records = [];
+        let title = raw?.title || "Import";
+
+	        const push = (type, data = {}) => {
+	          const rt = canonicalRecordType(type);
+	          if (!rt) return;
+	          let fields = null;
+	          if (rt === "Measurement") fields = buildMeasurement(data);
+	          else if (rt === "Item") fields = buildItem(data);
+	          else if (rt === "Option") fields = buildOption(data);
+	          else if (rt === "Purchase") fields = buildPurchase(data);
+	          else if (rt === "Note") fields = buildNote(data);
+	          if (!fields) return;
+	          const airtableId = normalizeAirtableId(data);
+	          const previewTitle = fields["Title"] || fields["Measure Label"] || "(untitled)";
+	          const room = fields["Room"] || "";
+	          records.push({
+	            recordType: rt,
+	            airtableId,
+	            fields,
+	            previewTitle,
+	            previewRoom: room,
+	            previewStatus: fields["Status"] || fields["Confidence"] || "",
+	            previewExtra: rt === "Measurement"
+	              ? `${fields["Value"] ?? "?"} ${fields["Unit Entered"] || ""}`
+	              : rt === "Option"
+	                ? `Final ${fields["Final Total"] ?? "?"}`
+	                : ""
+	          });
+	        };
+
+        if (Array.isArray(raw?.records)) {
+          raw.records.forEach(r => push(r.recordType || r.type, r));
+        }
+
+        ["measurements", "items", "options", "purchases", "notes"].forEach(key => {
+          if (Array.isArray(raw?.[key])) {
+            raw[key].forEach(r => push(key.slice(0, -1), r));
+          }
+        });
+
+        if (Array.isArray(raw) && !records.length) {
+          raw.forEach(r => push(r.recordType || r.type, r));
+        }
+
+        if (Array.isArray(raw?.apartments)) {
+          raw.apartments.forEach(a => {
+            push("item", {
+              title: a.comment || a.url,
+              room: a.group,
+              priority: a.priority,
+              status: a.status || "Shortlist",
+              link: a.url,
+              notes: a.comment
+            });
+          });
+        }
+
+        if (raw?.viewing_list?.groups) {
+          raw.viewing_list.groups.forEach(group => {
+            (group.properties || []).forEach(prop => {
+              push("item", {
+                title: prop.comment || prop.url,
+                room: group.group_name,
+                priority: group.priority_level,
+                status: "Shortlist",
+                link: prop.url,
+                notes: prop.comment
+              });
+            });
+          });
+        }
+
+        if (Array.isArray(raw) && !records.length) {
+          raw.forEach(it => {
+            if (it?.title || it?.url) {
+              push("item", it);
+            }
+          });
+        }
+
+        const seen = new Set();
+        const deduped = [];
+        records.forEach(r => {
+          const link = r.fields && Object.prototype.hasOwnProperty.call(r.fields, "Link") ? r.fields["Link"] : "";
+          const measureLabel = r.fields && Object.prototype.hasOwnProperty.call(r.fields, "Measure Label") ? r.fields["Measure Label"] : "";
+          const parentKey = r.fields && Object.prototype.hasOwnProperty.call(r.fields, "Parent Item Key") ? r.fields["Parent Item Key"] : "";
+          const parentId = r.fields && Object.prototype.hasOwnProperty.call(r.fields, "Parent Item Record Id") ? r.fields["Parent Item Record Id"] : "";
+          const key = `${r.recordType}::${r.previewTitle}::${r.previewRoom}::${link}::${measureLabel}::${parentKey}::${parentId}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          deduped.push(r);
+        });
+
+        if (!deduped.length) return { ok: false, message: "No importable records found." };
+        return { ok: true, title, records: deduped };
+      }
+
+      function parseMarkdownTasks(text) {
+        const items = [];
+        const lines = text.split(/\r?\n/);
+        lines.forEach(line => {
+          const m = line.match(/^- \[( |x|X)\]\s*(.+)$/);
+          if (!m) return;
+          const checked = m[1].toLowerCase() === "x";
+          const content = m[2];
+          const tags = Array.from(content.matchAll(/#(\w+)/g)).map(x => x[1]);
+          const title = content.replace(/#\w+/g, "").trim();
+          const room = normalizeRoom(tags.find(t => ROOM_OPTIONS.map(r => r.toLowerCase()).includes(t.toLowerCase())));
+          const priorityTag = tags.find(t => /^P\d$/.test(t) || /^P\d\d$/.test(t));
+          let priority = null;
+          if (priorityTag) {
+            const num = Number(priorityTag.replace(/P/i, ""));
+            priority = Number.isFinite(num) ? Math.max(1, Math.min(5, num || 1)) : null;
+          }
+          items.push({
+            recordType: "Item",
+            fields: buildItem({
+              title,
+              room,
+              priority,
+              status: checked ? "Selected" : "Idea",
+              link: "",
+              notes: ""
+            }),
+            previewTitle: title,
+            previewRoom: room,
+            previewStatus: checked ? "Selected" : "Idea",
+            previewExtra: priority ? `P${priority}` : ""
+          });
+        });
+        if (!items.length) return { ok: false, message: "No checklist lines found (use '- [ ] text')." };
+        return { ok: true, title: "Markdown checklist", records: items };
+      }
+
+      function describeRecord(rec) {
+        if (rec.recordType === "Measurement") {
+          return `${rec.previewExtra} -> ${rec.fields["Value (cm)"]} cm (${rec.fields["Value (in)"]} in)`;
+        }
+        if (rec.recordType === "Option") {
+          return `Final ${rec.fields["Final Total"] ?? "?"} | Parent: ${rec.fields["Parent Item Key"] || rec.fields["Parent Item Record Id"] || "—"}`;
+        }
+        if (rec.recordType === "Purchase") {
+          return `Order ${rec.fields["Order Number"] || ""} | Deliver by ${rec.fields["Expected Delivery"] || "?"}`;
+        }
+        if (rec.recordType === "Note") return rec.fields["Notes"] || "";
+        return `${rec.previewStatus || ""} ${rec.previewExtra || ""}`.trim();
+      }
+
+      function renderImportPreview(data) {
+        const wrap = el("importPreview");
+        const actions = el("importActions");
+        if (!wrap) return;
+        wrap.innerHTML = "";
+        const normalized = data;
+        importData = normalized;
+        const counts = normalized.records.reduce((acc, r) => {
+          acc[r.recordType] = (acc[r.recordType] || 0) + 1;
+          return acc;
+        }, {});
+        const summary = Object.entries(counts).map(([k, v]) => `${k}: ${v}`).join(" • ");
+        wrap.innerHTML = `
+          <div><strong>${escapeHtml(normalized.title)}</strong> — ${normalized.records.length} records (${escapeHtml(summary)})</div>
+          <div class="small light" style="margin:4px 0;">Uncheck any you do not want to import.</div>
+        `;
+        normalized.records.forEach((rec, idx) => {
+          const row = document.createElement("div");
+          row.className = "import-row";
+          row.innerHTML = `
+            <div class="import-row-top">
+              <input type="checkbox" data-import-idx="${idx}" checked />
+              <div>
+	                <div class="import-row-meta">
+	                  <span class="pill">${escapeHtml(rec.recordType)}</span>
+	                  ${rec.airtableId ? `<span class="pill">Update</span>` : `<span class="pill">Create</span>`}
+	                  <span class="import-row-title">${escapeHtml(rec.previewTitle)}</span>
+	                  ${rec.fields["Link"] ? `<a class="inline-link" href="${escapeHtml(rec.fields["Link"])}" target="_blank" rel="noreferrer noopener">open</a>` : ""}
+	                  ${rec.previewRoom ? `<span class="pill">${escapeHtml(rec.previewRoom)}</span>` : ""}
+	                  ${rec.previewStatus ? `<span class="status-pill">${escapeHtml(rec.previewStatus)}</span>` : ""}
+                  ${rec.previewExtra ? `<span class="priority-pill">${escapeHtml(rec.previewExtra)}</span>` : ""}
+                </div>
+                <div class="import-row-sub">${escapeHtml(describeRecord(rec))}</div>
+              </div>
+            </div>
+          `;
+          wrap.appendChild(row);
+        });
+        actions.classList.remove("hidden");
+        showInlineMsg("importMsg", `${normalized.records.length} ready`);
+      }
+
+	      async function importSelected() {
+	        if (!importData) return;
+	        const checks = Array.from(document.querySelectorAll("[data-import-idx]:checked"));
+	        if (!checks.length) {
+	          showInlineMsg("importMsg", "Select at least one record.", true);
+	          return;
+	        }
+		        const records = checks.map(cb => importData.records[Number(cb.getAttribute("data-import-idx"))]);
+		        const updates = records.filter(r => r.airtableId);
+		        const creates = records.filter(r => !r.airtableId);
+		        if (updates.length) {
+		          const msg = `This import will UPDATE ${updates.length} record(s) and CREATE ${creates.length} record(s). Continue?`;
+		          if (!confirm(msg)) {
+		            showInlineMsg("importMsg", "Import cancelled.");
+		            return;
+		          }
+		        }
+		        showInlineMsg("importMsg", `Importing ${records.length} (updates: ${updates.length}, creates: ${creates.length})...`);
+	        const batchSize = 10;
+	        const omittedFields = new Set(); // actual Airtable field names we auto-drop after 422 errors
+	        const protectedFields = new Set([mapField("Record Type"), mapField("Title")]);
+
+	        const parseUnknownFieldName = (message) => {
+	          const msg = String(message || "");
+	          const match = msg.match(/Unknown field name:\s*\"?([^\"\n]+)\"?/i);
+	          return match ? match[1] : null;
+	        };
+
+	        const stripOmitted = (fields) => {
+	          const out = {};
+	          Object.entries(fields || {}).forEach(([k, v]) => {
+	            if (omittedFields.has(k)) return;
+	            out[k] = v;
+	          });
+	          return out;
+	        };
+
+	        try {
+	          let done = 0;
+
+	          // Batch updates (PATCH table endpoint)
+	          for (let i = 0; i < updates.length; i += batchSize) {
+	            const slice = updates.slice(i, i + batchSize);
+	            let attempts = 0;
+	            while (true) {
+	              const batch = slice.map(r => ({
+	                id: r.airtableId,
+	                fields: stripOmitted(toAirtableFields(r.fields))
+	              }));
+	              try {
+	                await airtableFetch(API_BASE, {
+	                  method: "PATCH",
+	                  headers: HEADERS,
+	                  body: JSON.stringify({ records: batch })
+	                });
+	                break;
+	              } catch (err) {
+	                const unknown = parseUnknownFieldName(err.message);
+	                if (unknown && protectedFields.has(unknown)) {
+	                  throw new Error(
+	                    `Missing required Airtable column "${unknown}" (mapped from Record Type/Title). Open Field mapping to correct it, or create the column in Airtable.`
+	                  );
+	                }
+	                if (unknown && !protectedFields.has(unknown) && attempts < 10) {
+	                  omittedFields.add(unknown);
+	                  attempts += 1;
+	                  continue; // retry the same batch without this field
+	                }
+	                throw err;
+	              }
+	            }
+	            done += slice.length;
+	            showInlineMsg("importMsg", `Imported ${done} of ${records.length}...`);
+	          }
+
+	          // Batch creates (POST table endpoint)
+	          for (let i = 0; i < creates.length; i += batchSize) {
+	            const slice = creates.slice(i, i + batchSize);
+	            let attempts = 0;
+	            while (true) {
+	              const batch = slice.map(r => ({ fields: stripOmitted(toAirtableFields(r.fields)) }));
+	              try {
+	                await airtableFetch(API_BASE, {
+	                  method: "POST",
+	                  headers: HEADERS,
+	                  body: JSON.stringify({ records: batch })
+	                });
+	                break;
+	              } catch (err) {
+	                const unknown = parseUnknownFieldName(err.message);
+	                if (unknown && protectedFields.has(unknown)) {
+	                  throw new Error(
+	                    `Missing required Airtable column "${unknown}" (mapped from Record Type/Title). Open Field mapping to correct it, or create the column in Airtable.`
+	                  );
+	                }
+	                if (unknown && !protectedFields.has(unknown) && attempts < 10) {
+	                  omittedFields.add(unknown);
+	                  attempts += 1;
+	                  continue; // retry the same batch without this field
+	                }
+	                throw err;
+	              }
+	            }
+	            done += slice.length;
+	            showInlineMsg("importMsg", `Imported ${done} of ${records.length}...`);
+	          }
+
+	          const omittedMsg = omittedFields.size ? ` (dropped unknown columns: ${[...omittedFields].join(", ")})` : "";
+	          showInlineMsg("importMsg", "Import complete ✓" + omittedMsg);
+	          importData = null;
+	          el("importPreview").innerHTML = "";
+	          el("importActions").classList.add("hidden");
+          await reload(false);
+        } catch (err) {
+          const unknown = parseUnknownFieldName(err.message);
+          if (unknown) {
+            showInlineMsg(
+              "importMsg",
+              `Import failed: Airtable says column "${unknown}" does not exist. Create/rename it, or open Field mapping (and click "Load Airtable columns") to map correctly.`,
+              true
+            );
+          } else {
+            showInlineMsg("importMsg", "Import failed: " + err.message, true);
+          }
+	        }
+	      }
+
+	      // --- Export handling ---
+	      function slugifyFilename(text) {
+	        const s = String(text || "").toLowerCase();
+	        const cleaned = s.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+	        return cleaned || "furnishing-export";
+	      }
+
+	      function downloadTextFile(filename, text) {
+	        const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+	        const url = URL.createObjectURL(blob);
+	        const a = document.createElement("a");
+	        a.href = url;
+	        a.download = filename;
+	        document.body.appendChild(a);
+	        a.click();
+	        a.remove();
+	        setTimeout(() => URL.revokeObjectURL(url), 500);
+	      }
+
+	      async function copyTextToClipboard(text) {
+	        if (navigator.clipboard && navigator.clipboard.writeText) {
+	          await navigator.clipboard.writeText(text);
+	          return true;
+	        }
+	        // Fallback
+	        const ta = document.createElement("textarea");
+	        ta.value = text;
+	        document.body.appendChild(ta);
+	        ta.select();
+	        const ok = document.execCommand("copy");
+	        ta.remove();
+	        return ok;
+	      }
+
+	      function recordToExportObject(rec, rt, includeIds) {
+	        const addId = (obj) => includeIds ? { ...obj, airtableId: rec.id } : obj;
+
+	        if (rt === "Measurement") {
+	          return addId({
+	            label: getField(rec, "Measure Label") || getField(rec, "Title") || "",
+	            title: getField(rec, "Title") || "",
+	            room: getField(rec, "Room") || "",
+	            value: toNumber(getField(rec, "Value")),
+	            unit: getField(rec, "Unit Entered") || "",
+	            value_cm: toNumber(getField(rec, "Value (cm)")),
+	            value_in: toNumber(getField(rec, "Value (in)")),
+	            confidence: getField(rec, "Confidence") || "",
+	            notes: getField(rec, "Notes") || ""
+	          });
+	        }
+
+	        if (rt === "Item") {
+	          const parsed = parseNotesAndSpecs(getField(rec, "Notes", ""));
+	          const specs = parsed.specs || {};
+	          const category = String(specs.category || "").trim() || "Other";
+	          const { category: _ignored, ...rest } = specs;
+	          return addId({
+	            title: getField(rec, "Title") || "",
+	            room: getField(rec, "Room") || "",
+	            status: getField(rec, "Status") || "",
+	            priority: toNumber(getField(rec, "Priority")),
+	            link: getField(rec, "Link") || "",
+	            notes: parsed.notes || "",
+	            budget: toNumber(getField(rec, "Budget Target")),
+	            price: toNumber(getField(rec, "Price")),
+	            quantity: toNumber(getField(rec, "Quantity")) ?? 1,
+	            selectedOptionId: getField(rec, "Selected Option Id") || "",
+	            category,
+	            specs: rest
+	          });
+	        }
+
+	        if (rt === "Option") {
+	          return addId({
+	            title: getField(rec, "Title") || "",
+	            parentRecordId: getField(rec, "Parent Item Record Id") || "",
+	            parentTitle: getField(rec, "Parent Item Key") || "",
+	            store: getField(rec, "Store") || "",
+	            link: getField(rec, "Link") || "",
+	            promo: getField(rec, "Promo Code") || "",
+	            price: toNumber(getField(rec, "Price")),
+	            discount: toNumber(getField(rec, "Discount")),
+	            shipping: toNumber(getField(rec, "Shipping")),
+	            tax: toNumber(getField(rec, "Tax Estimate")),
+	            finalTotal: toNumber(getField(rec, "Final Total")),
+	            dimensions: getField(rec, "Dimensions") || "",
+	            notes: getField(rec, "Notes") || ""
+	          });
+	        }
+
+	        if (rt === "Purchase") {
+	          return addId({
+	            title: getField(rec, "Title") || "",
+	            orderDate: getField(rec, "Order Date") || "",
+	            orderNumber: getField(rec, "Order Number") || "",
+	            expectedDelivery: getField(rec, "Expected Delivery") || "",
+	            actualDelivery: getField(rec, "Actual Delivery") || "",
+	            returnBy: getField(rec, "Return By") || "",
+	            price: toNumber(getField(rec, "Price")),
+	            notes: getField(rec, "Notes") || ""
+	          });
+	        }
+
+	        if (rt === "Note") {
+	          return addId({
+	            title: getField(rec, "Title") || "",
+	            room: getField(rec, "Room") || "",
+	            notes: getField(rec, "Notes") || ""
+	          });
+	        }
+
+	        return null;
+	      }
+
+	      function buildExportObject(scope, includeIds, title) {
+	        const list = scope === "filtered" ? filteredRecords(null) : allRecords;
+	        const out = {
+	          title: String(title || "").trim() || "Export",
+	          exportedAt: new Date().toISOString(),
+	          measurements: [],
+	          items: [],
+	          options: [],
+	          purchases: [],
+	          notes: []
+	        };
+
+	        const buckets = {
+	          "Measurement": "measurements",
+	          "Item": "items",
+	          "Option": "options",
+	          "Purchase": "purchases",
+	          "Note": "notes"
+	        };
+
+	        (list || []).forEach(rec => {
+	          const rt = getField(rec, "Record Type", "");
+	          const bucket = buckets[rt];
+	          if (!bucket) return;
+	          const obj = recordToExportObject(rec, rt, includeIds);
+	          if (!obj) return;
+	          out[bucket].push(obj);
+	        });
+
+	        return out;
+	      }
+
+	      function generateExportJson() {
+	        const scope = el("exportScope")?.value || "all";
+	        const includeIds = !!el("exportIncludeIds")?.checked;
+	        const title = el("exportTitle")?.value || "";
+	        const obj = buildExportObject(scope, includeIds, title);
+	        return JSON.stringify(obj, null, 2);
+	      }
+
+	      // --- Event wiring ---
+		      function attachEvents() {
+		        populateStaticSelects();
+		        attachMappingHandlers();
+		        attachTemplateHandlers();
+
+	        el("btnReload")?.addEventListener("click", () => reload(true));
+	        el("btnSchema")?.addEventListener("click", runSchemaCheck);
+	        el("btnAddMeasurement")?.addEventListener("click", handleAddMeasurement);
+	        el("btnAddItem")?.addEventListener("click", handleAddItem);
+	        el("btnAddOption")?.addEventListener("click", handleAddOption);
+	        el("filterRecordType")?.addEventListener("change", renderAll);
+	        el("filterStatus")?.addEventListener("change", renderAll);
+	        el("iCategory")?.addEventListener("change", () => {
+	          const cat = el("iCategory").value;
+	          const specs = collectSpecsFromEditor(el("iSpecsWrap"), cat);
+	          specs.category = cat;
+	          renderSpecsEditor(el("iSpecsWrap"), cat, specs, { hint: "Saved inside Notes when you add the item." });
+	        });
+
+	        // Tabs
+	        document.querySelectorAll(".tab-btn").forEach(btn => {
+	          btn.addEventListener("click", () => {
+	            document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+            document.querySelectorAll(".tab-section").forEach(sec => sec.classList.remove("active"));
+            btn.classList.add("active");
+            const tabId = btn.getAttribute("data-tab");
+            el(`tab-${tabId}`)?.classList.add("active");
+          });
+        });
+
+        // Import: JSON file
+        el("jsonFileInput")?.addEventListener("change", (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            try {
+              const data = JSON.parse(evt.target.result);
+              const norm = normalizeImport(data);
+              if (!norm.ok) {
+                showInlineMsg("importMsg", norm.message, true);
+                return;
+              }
+              renderImportPreview(norm);
+            } catch (err) {
+              showInlineMsg("importMsg", "JSON parse error: " + err.message, true);
+            }
+          };
+          reader.readAsText(file);
+        });
+
+        el("btnClearImport")?.addEventListener("click", () => {
+          importData = null;
+          el("importPreview").innerHTML = "";
+          el("importActions").classList.add("hidden");
+          showInlineMsg("importMsg", "");
+        });
+
+        el("btnParseMarkdown")?.addEventListener("click", () => {
+          const text = el("mdInput").value || "";
+          const norm = parseMarkdownTasks(text);
+          if (!norm.ok) {
+            showInlineMsg("importMsg", norm.message, true);
+            return;
+          }
+          renderImportPreview(norm);
+        });
+
+        el("btnImportSelected")?.addEventListener("click", importSelected);
+        el("btnSelectAll")?.addEventListener("click", () => {
+          document.querySelectorAll("[data-import-idx]").forEach(cb => cb.checked = true);
+          showInlineMsg("importMsg", "All selected");
+        });
+		        el("btnDeselectAll")?.addEventListener("click", () => {
+		          document.querySelectorAll("[data-import-idx]").forEach(cb => cb.checked = false);
+		          showInlineMsg("importMsg", "All deselected");
+		        });
+
+		        // Export
+		        el("btnGenerateExport")?.addEventListener("click", () => {
+		          try {
+		            const json = generateExportJson();
+		            el("exportOutput").value = json;
+		            showInlineMsg("exportMsg", `Generated ${json.length} chars`);
+		          } catch (err) {
+		            showInlineMsg("exportMsg", "Export error: " + err.message, true);
+		          }
+		        });
+		        el("btnDownloadExport")?.addEventListener("click", () => {
+		          try {
+		            const json = generateExportJson();
+		            el("exportOutput").value = json;
+		            const title = el("exportTitle")?.value || "export";
+		            const date = new Date().toISOString().split("T")[0];
+		            const filename = `${slugifyFilename(title)}-${date}.json`;
+		            downloadTextFile(filename, json);
+		            showInlineMsg("exportMsg", `Downloaded ${filename}`);
+		          } catch (err) {
+		            showInlineMsg("exportMsg", "Export error: " + err.message, true);
+		          }
+		        });
+		        el("btnCopyExport")?.addEventListener("click", async () => {
+		          try {
+		            const json = el("exportOutput").value || generateExportJson();
+		            el("exportOutput").value = json;
+		            await copyTextToClipboard(json);
+		            showInlineMsg("exportMsg", "Copied to clipboard");
+		          } catch (err) {
+		            showInlineMsg("exportMsg", "Copy failed: " + err.message, true);
+		          }
+		        });
+		      }
+
+      // --- Reload ---
+      async function reload(showLoading = true) {
+        if (showLoading) {
+          showGlobalError("");
+          el("measurementsList").innerHTML = "Loading...";
+          el("itemsList").innerHTML = "";
+          el("optionsList").innerHTML = "";
+        }
+        try {
+          allRecords = await listRecords();
+          renderAll();
+        } catch (err) {
+          showGlobalError("Failed to load records: " + err.message);
+        }
+      }
+
+      // --- Kickoff ---
+      attachEvents();
+      renderMappingTable();
+      reload(true);
+    })();
+  </script>
+</body>
+
+</html>

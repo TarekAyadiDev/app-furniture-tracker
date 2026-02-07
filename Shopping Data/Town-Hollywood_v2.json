@@ -1,0 +1,1531 @@
+{
+  "version": 2,
+  "exportedAt": "2026-02-07T22:00:51.153Z",
+  "home": {
+    "name": "Town Hollywood",
+    "tags": [
+      "furniture",
+      "Town"
+    ],
+    "description": "Town Hollywood B1.1 Furnishing Plan\n\nTown Hollywood (layout B1.1 – 2 bed / 2 bath). Interior 1,094 sq ft; Balcony 243 sq ft; Total 1,337 sq ft.\n\nBest approach: use sq ft for rough sizing, then take quick real measurements for perfect fit."
+  },
+  "planner": {
+    "version": 1,
+    "mergedAt": "2026-02-07T21:58:38.888Z",
+    "template": {
+      "units": {
+        "primary": "in",
+        "secondary": "cm_in_brackets",
+        "format_example": "60 [152.4]"
+      },
+      "measurement_rules": {
+        "always_capture": [
+          "clear_width (wall-to-wall usable span, excluding baseboards if possible)",
+          "clear_length (usable span)",
+          "ceiling_height",
+          "door_clear_width",
+          "door_swing_and_clearance_zone",
+          "window_width_and_location_from_corner",
+          "baseboard_depth",
+          "radiator_or_HVAC_vent_locations_and_sizes (if any)",
+          "outlet_locations (at least for TV/desk/bed walls)"
+        ],
+        "how_to_measure_walls": [
+          "Measure each main wall as: total wall length, then subtract obstructions (doors, windows, closets, columns).",
+          "For each obstruction, capture: width, height, distance from nearest corner, and projection depth (trim/ledge)."
+        ]
+      },
+      "rooms": [
+        {
+          "name": "Entry / Foyer",
+          "category": "circulation",
+          "furniture_relevance_tags": [
+            "console_table",
+            "shoe_storage",
+            "mirror"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "entry_clear_width",
+              "constraint_tags": [
+                "console_table"
+              ]
+            },
+            {
+              "key": "entry_clear_length",
+              "constraint_tags": [
+                "console_table"
+              ]
+            },
+            {
+              "key": "front_door_clear_width",
+              "constraint_tags": [
+                "moving_large_items"
+              ]
+            },
+            {
+              "key": "front_door_to_wall_clearance",
+              "constraint_tags": [
+                "console_table",
+                "shoe_storage"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Console/Mirror wall",
+              "measure_fields": [
+                "usable_wall_length",
+                "distance_to_nearest_door_trim",
+                "outlet_location"
+              ],
+              "constraints_for": [
+                "console_table"
+              ]
+            }
+          ],
+          "known_measures": {}
+        },
+        {
+          "name": "Hallway(s)",
+          "category": "circulation",
+          "furniture_relevance_tags": [
+            "runner_rug",
+            "art"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "hallway_clear_width",
+              "constraint_tags": [
+                "moving_large_items",
+                "runner_rug"
+              ]
+            },
+            {
+              "key": "turning_radius_at_corners",
+              "constraint_tags": [
+                "moving_large_items"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Long hallway wall(s)",
+              "measure_fields": [
+                "wall_length_segments_between_doors"
+              ],
+              "constraints_for": [
+                "art"
+              ]
+            }
+          ],
+          "known_measures": {}
+        },
+        {
+          "name": "Great Room / Living Area",
+          "category": "living",
+          "furniture_relevance_tags": [
+            "sofa",
+            "tv",
+            "media_console",
+            "coffee_table",
+            "accent_chairs",
+            "rug"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "overall_clear_width",
+              "constraint_tags": [
+                "sofa",
+                "rug"
+              ]
+            },
+            {
+              "key": "overall_clear_length",
+              "constraint_tags": [
+                "sofa",
+                "rug"
+              ]
+            },
+            {
+              "key": "main_tv_wall_usable_length",
+              "constraint_tags": [
+                "tv",
+                "media_console"
+              ]
+            },
+            {
+              "key": "sofa_wall_usable_length",
+              "constraint_tags": [
+                "sofa"
+              ]
+            },
+            {
+              "key": "distance_tv_wall_to_sofa_wall",
+              "constraint_tags": [
+                "tv",
+                "sofa"
+              ]
+            },
+            {
+              "key": "path_clearance_to_balcony_or_kitchen",
+              "constraint_tags": [
+                "sofa",
+                "sectional"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "TV wall",
+              "measure_fields": [
+                "usable_wall_length",
+                "outlet_location_and_height",
+                "distance_from_corners_to_outlets",
+                "window_or_door_offsets (if present)"
+              ],
+              "constraints_for": [
+                "tv",
+                "media_console"
+              ]
+            },
+            {
+              "wall_label": "Sofa/Sectional wall",
+              "measure_fields": [
+                "usable_wall_length",
+                "obstructions (doors/windows/vents)",
+                "baseboard_depth"
+              ],
+              "constraints_for": [
+                "sofa"
+              ]
+            }
+          ],
+          "known_measures": {
+            "labeled_spans": [
+              {
+                "value_in": "144 [365.76]",
+                "note": "Great Room labeled span 12'0\""
+              },
+              {
+                "value_in": "151 [383.54]",
+                "note": "Great Room labeled span 12'7\""
+              }
+            ]
+          }
+        },
+        {
+          "name": "Dining Area",
+          "category": "living",
+          "furniture_relevance_tags": [
+            "dining_table",
+            "chairs",
+            "sideboard"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "dining_zone_clear_width",
+              "constraint_tags": [
+                "dining_table"
+              ]
+            },
+            {
+              "key": "dining_zone_clear_length",
+              "constraint_tags": [
+                "dining_table"
+              ]
+            },
+            {
+              "key": "clearance_to_walkways",
+              "constraint_tags": [
+                "dining_table"
+              ]
+            },
+            {
+              "key": "sideboard_wall_usable_length",
+              "constraint_tags": [
+                "sideboard"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Sideboard wall",
+              "measure_fields": [
+                "usable_wall_length",
+                "outlets",
+                "window_offsets (if any)"
+              ],
+              "constraints_for": [
+                "sideboard"
+              ]
+            }
+          ],
+          "known_measures": {}
+        },
+        {
+          "name": "Kitchen",
+          "category": "kitchen",
+          "furniture_relevance_tags": [
+            "bar_stools",
+            "kitchen_cart",
+            "trash_pullout_fit",
+            "appliance_clearance"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "kitchen_working_aisle_width",
+              "constraint_tags": [
+                "bar_stools",
+                "traffic_flow"
+              ]
+            },
+            {
+              "key": "counter_run_lengths (each segment)",
+              "constraint_tags": [
+                "kitchen_cart"
+              ]
+            },
+            {
+              "key": "fridge_niche_width_depth_height",
+              "constraint_tags": [
+                "appliance_fit"
+              ]
+            },
+            {
+              "key": "range_niche_width",
+              "constraint_tags": [
+                "appliance_fit"
+              ]
+            },
+            {
+              "key": "dishwasher_niche_width",
+              "constraint_tags": [
+                "appliance_fit"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Main counter wall/run",
+              "measure_fields": [
+                "counter_run_length_segments",
+                "upper_cabinet_clearance_height"
+              ],
+              "constraints_for": [
+                "kitchen_cart"
+              ]
+            }
+          ],
+          "known_measures": {
+            "kitchen_island": {
+              "length": "60 [152.4]",
+              "width": "30 [76.2]",
+              "note": "5'0\" x 2'6\""
+            }
+          }
+        },
+        {
+          "name": "Primary Bedroom (Master)",
+          "category": "bedroom",
+          "furniture_relevance_tags": [
+            "bed",
+            "nightstands",
+            "dresser",
+            "tv",
+            "desk"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "room_clear_width",
+              "constraint_tags": [
+                "bed",
+                "dresser"
+              ]
+            },
+            {
+              "key": "room_clear_length",
+              "constraint_tags": [
+                "bed",
+                "dresser"
+              ]
+            },
+            {
+              "key": "headboard_wall_usable_length",
+              "constraint_tags": [
+                "bed"
+              ]
+            },
+            {
+              "key": "bedside_clearance_left",
+              "constraint_tags": [
+                "bed",
+                "nightstands"
+              ]
+            },
+            {
+              "key": "bedside_clearance_right",
+              "constraint_tags": [
+                "bed",
+                "nightstands"
+              ]
+            },
+            {
+              "key": "dresser_wall_usable_length",
+              "constraint_tags": [
+                "dresser"
+              ]
+            },
+            {
+              "key": "closet_door_clearance_zone",
+              "constraint_tags": [
+                "bed",
+                "dresser"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Headboard wall",
+              "measure_fields": [
+                "usable_wall_length",
+                "outlet_location_each_side",
+                "window_offsets (if any)"
+              ],
+              "constraints_for": [
+                "bed"
+              ]
+            },
+            {
+              "wall_label": "Dresser/TV wall",
+              "measure_fields": [
+                "usable_wall_length",
+                "outlet_location_and_height"
+              ],
+              "constraints_for": [
+                "dresser",
+                "tv"
+              ]
+            }
+          ],
+          "known_measures": {
+            "room_size": {
+              "width": "129 [327.66]",
+              "length": "185 [469.9]",
+              "note": "10'9\" x 15'5\" (per your corrected naming)"
+            }
+          }
+        },
+        {
+          "name": "Bedroom 2",
+          "category": "bedroom",
+          "furniture_relevance_tags": [
+            "bed",
+            "desk",
+            "dresser",
+            "nightstands"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "room_clear_width",
+              "constraint_tags": [
+                "bed",
+                "desk"
+              ]
+            },
+            {
+              "key": "room_clear_length",
+              "constraint_tags": [
+                "bed",
+                "desk"
+              ]
+            },
+            {
+              "key": "headboard_wall_usable_length",
+              "constraint_tags": [
+                "bed"
+              ]
+            },
+            {
+              "key": "desk_wall_usable_length",
+              "constraint_tags": [
+                "desk"
+              ]
+            },
+            {
+              "key": "closet_clearance_zone",
+              "constraint_tags": [
+                "bed",
+                "desk",
+                "dresser"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Headboard wall",
+              "measure_fields": [
+                "usable_wall_length",
+                "outlet_location_each_side"
+              ],
+              "constraints_for": [
+                "bed"
+              ]
+            }
+          ],
+          "known_measures": {
+            "room_size": {
+              "width": "120 [304.8]",
+              "length": "144 [365.76]",
+              "note": "10'0\" x 12'0\" (per your corrected naming)"
+            }
+          }
+        },
+        {
+          "name": "Bathroom (Primary)",
+          "category": "bathroom",
+          "furniture_relevance_tags": [
+            "vanity_storage",
+            "shelving",
+            "bath_mat"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "vanity_width",
+              "constraint_tags": [
+                "vanity_storage"
+              ]
+            },
+            {
+              "key": "space_next_to_vanity (if adding storage)",
+              "constraint_tags": [
+                "shelving"
+              ]
+            },
+            {
+              "key": "toilet_side_clearance",
+              "constraint_tags": [
+                "shelving"
+              ]
+            },
+            {
+              "key": "shower_door_swing_or_slider_clearance",
+              "constraint_tags": [
+                "storage"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Vanity wall",
+              "measure_fields": [
+                "vanity_width",
+                "mirror_width",
+                "outlet_location"
+              ],
+              "constraints_for": [
+                "vanity_storage"
+              ]
+            }
+          ],
+          "known_measures": {}
+        },
+        {
+          "name": "Bathroom (Secondary)",
+          "category": "bathroom",
+          "furniture_relevance_tags": [
+            "vanity_storage",
+            "shelving",
+            "bath_mat"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "vanity_width",
+              "constraint_tags": [
+                "vanity_storage"
+              ]
+            },
+            {
+              "key": "towel_bar_wall_span",
+              "constraint_tags": [
+                "towel_storage"
+              ]
+            },
+            {
+              "key": "shower_clearance",
+              "constraint_tags": [
+                "storage"
+              ]
+            }
+          ],
+          "walls_to_care_about": [
+            {
+              "wall_label": "Vanity wall",
+              "measure_fields": [
+                "vanity_width",
+                "outlet_location"
+              ],
+              "constraints_for": [
+                "vanity_storage"
+              ]
+            }
+          ],
+          "known_measures": {}
+        },
+        {
+          "name": "Laundry / Utility (if present)",
+          "category": "utility",
+          "furniture_relevance_tags": [
+            "washer_dryer_fit",
+            "shelving",
+            "hamper"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "washer_niche_width_depth_height",
+              "constraint_tags": [
+                "washer_dryer_fit"
+              ]
+            },
+            {
+              "key": "dryer_niche_width_depth_height",
+              "constraint_tags": [
+                "washer_dryer_fit"
+              ]
+            },
+            {
+              "key": "door_clear_width",
+              "constraint_tags": [
+                "moving_large_items"
+              ]
+            },
+            {
+              "key": "shelf_wall_usable_length",
+              "constraint_tags": [
+                "shelving"
+              ]
+            }
+          ],
+          "walls_to_care_about": [],
+          "known_measures": {}
+        },
+        {
+          "name": "Closets (all)",
+          "category": "storage",
+          "furniture_relevance_tags": [
+            "storage_systems",
+            "hangers",
+            "shoe_racks"
+          ],
+          "key_measures_to_capture": [
+            {
+              "key": "closet_opening_clear_width",
+              "constraint_tags": [
+                "storage_systems"
+              ]
+            },
+            {
+              "key": "closet_depth",
+              "constraint_tags": [
+                "hangers",
+                "storage_systems"
+              ]
+            },
+            {
+              "key": "closet_interior_width",
+              "constraint_tags": [
+                "storage_systems"
+              ]
+            }
+          ],
+          "walls_to_care_about": [],
+          "known_measures": {}
+        }
+      ],
+      "global_walls_to_prioritize": [
+        {
+          "label": "Primary TV wall (Living)",
+          "why": "Constrains TV + media console width and placement",
+          "constraint_tags": [
+            "tv",
+            "media_console"
+          ],
+          "measure_fields": [
+            "usable_wall_length",
+            "outlet_location_and_height",
+            "distance_from left corner to outlet",
+            "distance_from right corner to outlet",
+            "any obstruction widths"
+          ]
+        },
+        {
+          "label": "Primary sofa wall (Living)",
+          "why": "Constrains sofa/sectional maximum length and chaise direction",
+          "constraint_tags": [
+            "sofa",
+            "sectional"
+          ],
+          "measure_fields": [
+            "usable_wall_length",
+            "obstructions",
+            "traffic_clearances"
+          ]
+        },
+        {
+          "label": "Primary headboard wall (Master)",
+          "why": "Constrains bed size (Queen/King) + nightstands",
+          "constraint_tags": [
+            "bed",
+            "nightstands"
+          ],
+          "measure_fields": [
+            "usable_wall_length",
+            "outlet_locations"
+          ]
+        },
+        {
+          "label": "Secondary headboard wall (Bedroom 2)",
+          "why": "Constrains bed + desk layout",
+          "constraint_tags": [
+            "bed",
+            "desk"
+          ],
+          "measure_fields": [
+            "usable_wall_length",
+            "outlet_locations"
+          ]
+        }
+      ],
+      "known_interior_measures_so_far": {
+        "Primary Bedroom (Master)": {
+          "width": "129 [327.66]",
+          "length": "185 [469.9]"
+        },
+        "Bedroom 2": {
+          "width": "120 [304.8]",
+          "length": "144 [365.76]"
+        },
+        "Great Room (labeled spans)": [
+          "144 [365.76]",
+          "151 [383.54]"
+        ],
+        "Kitchen Island": {
+          "length": "60 [152.4]",
+          "width": "30 [76.2]"
+        }
+      },
+      "next_best_measures_to_collect_first": [
+        {
+          "priority": 1,
+          "what": "Living TV wall usable length + outlet positions",
+          "why": "Unlocks TV size, media console width, and layout fast",
+          "constraint_tags": [
+            "tv",
+            "media_console"
+          ]
+        },
+        {
+          "priority": 2,
+          "what": "Living sofa wall usable length + walkway clearance",
+          "why": "Prevents buying a sofa/sectional that blocks circulation",
+          "constraint_tags": [
+            "sofa",
+            "sectional"
+          ]
+        },
+        {
+          "priority": 3,
+          "what": "Master headboard wall usable length + side clearances",
+          "why": "Confirms Queen vs King and nightstand fit",
+          "constraint_tags": [
+            "bed",
+            "nightstands"
+          ]
+        },
+        {
+          "priority": 4,
+          "what": "Door clear widths (front door + bedroom doors)",
+          "why": "Avoids delivery surprises for sofa/bed/large pieces",
+          "constraint_tags": [
+            "moving_large_items",
+            "sofa",
+            "bed"
+          ]
+        }
+      ]
+    }
+  },
+  "rooms": [
+    {
+      "id": "Balcony",
+      "notes": "",
+      "sort": 5,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488291736,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488291736,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "Bath",
+      "notes": "",
+      "sort": 4,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488291736,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488291736,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "Bedroom2",
+      "notes": "",
+      "sort": 1,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770490904580,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770490904580,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "Dining",
+      "notes": "",
+      "sort": 3,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488291736,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488291736,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "Entry",
+      "notes": "",
+      "sort": 6,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488291736,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488291736,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "Kitchen",
+      "notes": "",
+      "sort": 7,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488291736,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488291736,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "Living",
+      "notes": "#furniture #Town ; layout B1.1 2 bed/2 bath, interior 1,094 sq ft, balcony 243 sq ft. Measure walls to confirm fits.",
+      "sort": 2,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488291736,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488291736,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "Master",
+      "notes": "",
+      "sort": 0,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488291736,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488291736,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    }
+  ],
+  "measurements": [
+    {
+      "id": "m_0bb835bf-5dcc-4db5-b6b1-bd245a10cfaa",
+      "room": "Balcony",
+      "label": "Balcony depth",
+      "valueIn": 120,
+      "sort": 1,
+      "confidence": null,
+      "forCategory": null,
+      "forItemId": null,
+      "notes": null,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_1e5a6dd9-e401-46af-90a3-237fa44200e5",
+      "room": "Living",
+      "label": "Sofa-to-TV distance",
+      "valueIn": 132,
+      "sort": 1,
+      "confidence": "med",
+      "forCategory": null,
+      "forItemId": null,
+      "notes": null,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_2a352587-6801-4189-a337-e59f9f8bc4bc",
+      "room": "Master",
+      "label": "Master wall to wall depth",
+      "valueIn": 129,
+      "sort": 1,
+      "confidence": "med",
+      "forCategory": null,
+      "forItemId": null,
+      "notes": "Horizontal",
+      "createdAt": 1770488186635,
+      "updatedAt": 1770490580857,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770490580857,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_3a6229c2-3335-45c7-bfee-8573d0f3647e",
+      "room": "Bedroom2",
+      "label": "Bedroom2 bed/desk wall",
+      "valueIn": 144,
+      "sort": 0,
+      "confidence": null,
+      "forCategory": null,
+      "forItemId": null,
+      "notes": "Vertical",
+      "createdAt": 1770488186635,
+      "updatedAt": 1770490838350,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770490838350,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_48c42c18-bb41-4ecf-b4b0-672feb667502",
+      "room": "Living",
+      "label": "Great Room sofa wall",
+      "valueIn": 168,
+      "sort": 0,
+      "confidence": "med",
+      "forCategory": null,
+      "forItemId": null,
+      "notes": "longest clear wall",
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_7450ef4a-c894-4574-a1ed-3de9de165e86",
+      "room": "Dining",
+      "label": "Dining zone depth",
+      "valueIn": 72,
+      "sort": 1,
+      "confidence": null,
+      "forCategory": null,
+      "forItemId": null,
+      "notes": null,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_869f2cf2-5c42-48b0-909e-aab0fb0382fd",
+      "room": "Bedroom2",
+      "label": "Bedroom2 width",
+      "valueIn": 120,
+      "sort": 1,
+      "confidence": "med",
+      "forCategory": "Second bed",
+      "forItemId": null,
+      "notes": "Horizontal",
+      "createdAt": 1770488186635,
+      "updatedAt": 1770490997117,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770490997117,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_a86d2344-bf6c-484f-92f7-056608f2c181",
+      "room": "Master",
+      "label": "Master dresser wall",
+      "valueIn": 0,
+      "sort": 2,
+      "confidence": "low",
+      "forCategory": null,
+      "forItemId": null,
+      "notes": null,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770490545632,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770490545632,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_d59976ee-bb35-4d8a-9c41-305a41e8242e",
+      "room": "Balcony",
+      "label": "Balcony length",
+      "valueIn": 220,
+      "sort": 0,
+      "confidence": null,
+      "forCategory": null,
+      "forItemId": null,
+      "notes": null,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_ecca20ad-5568-484c-a06b-14ccbe585ebd",
+      "room": "Dining",
+      "label": "Dining zone width",
+      "valueIn": 96,
+      "sort": 0,
+      "confidence": null,
+      "forCategory": null,
+      "forItemId": null,
+      "notes": null,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "m_f1725e36-807c-40ac-9967-378d9cdb61ca",
+      "room": "Master",
+      "label": "Master bed wall",
+      "valueIn": 185,
+      "sort": 0,
+      "confidence": "med",
+      "forCategory": "Master bed",
+      "forItemId": null,
+      "notes": "Vertical",
+      "createdAt": 1770488186635,
+      "updatedAt": 1770490525949,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770490525949,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    }
+  ],
+  "items": [
+    {
+      "id": "i_054a887c-1609-4f18-83f5-d4b537641986",
+      "name": "Bed - Master",
+      "room": "Master",
+      "category": "Bed",
+      "status": "Selected",
+      "sort": 0,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": null,
+      "notes": "Queen for clearance (24-30 in each side target).",
+      "priority": 1,
+      "specs": {
+        "size": "Queen",
+        "type": "Platform",
+        "headboard": "Optional",
+        "finish": "Wood"
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488244270,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488244270,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "i_48c64476-5e62-41e1-85ca-91bbc25941b1",
+      "name": "Balcony set",
+      "room": "Balcony",
+      "category": "Balcony Set",
+      "status": "Idea",
+      "sort": 0,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": null,
+      "notes": "Lounge chairs + small table",
+      "priority": 3,
+      "specs": {
+        "type": "Lounge",
+        "material": "Outdoor-safe"
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "i_5e88bffb-1ba5-4455-aacd-a19d64b050c1",
+      "name": "TV console",
+      "room": "Living",
+      "category": "TV Console",
+      "status": "Idea",
+      "sort": 1,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": null,
+      "notes": "60-72 in wide, 15-18 in deep",
+      "priority": 2,
+      "dimensions": {
+        "wIn": 72,
+        "dIn": 18
+      },
+      "specs": {
+        "width_in": 72,
+        "depth_in": 18,
+        "style": "Wood / closed storage"
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488208508,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488208508,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "i_813c559d-3f53-4fbe-9e8c-69ee20175101",
+      "name": "Coffee table",
+      "room": "Living",
+      "category": "Coffee Table",
+      "status": "Idea",
+      "sort": 2,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": null,
+      "notes": null,
+      "priority": 3,
+      "dimensions": {
+        "hIn": 16
+      },
+      "specs": {
+        "shape": "Round",
+        "diameter_in": 36,
+        "height_in": 16,
+        "material": "Wood/stone"
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488208508,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488208508,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "i_8472d266-ffca-4528-a4bc-d734f0ba4c26",
+      "name": "Desk / Daybed",
+      "room": "Bedroom2",
+      "category": "Other",
+      "status": "Idea",
+      "sort": 0,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": null,
+      "notes": "Decide guest vs office; keep closet clearance.",
+      "priority": 2,
+      "specs": {
+        "use": "Office/guest combo",
+        "desk_width_in": 55,
+        "bed_type": "Daybed or Murphy"
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "i_86059dc9-a432-4305-bb60-9e0739efa8bc",
+      "name": "Dining table",
+      "room": "Dining",
+      "category": "Dining Table",
+      "status": "Idea",
+      "sort": 0,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": null,
+      "notes": "Round 42-48 in or 60x36 in",
+      "priority": 2,
+      "dimensions": {
+        "wIn": 36
+      },
+      "specs": {
+        "shape": "Rect",
+        "length_in": 60,
+        "width_in": 36,
+        "seats": 4
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "i_861b9f03-4de2-45c0-b08e-987cd35ee231",
+      "name": "Sofa",
+      "room": "Living",
+      "category": "Sofa",
+      "status": "Shortlist",
+      "sort": 0,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": "https://www.article.com",
+      "notes": "Target 90-95 in length. Keep walkway clear to dining zone.",
+      "priority": 1,
+      "dimensions": {
+        "wIn": 92,
+        "dIn": 39
+      },
+      "specs": {
+        "type": "Sofa",
+        "length_in": 92,
+        "depth_in": 39,
+        "fabric": "Performance fabric",
+        "color": "Neutral"
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488208508,
+      "syncState": "dirty",
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488208508,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "i_e9da31c3-034f-4e1b-a8eb-294ce060aea8",
+      "name": "Dresser",
+      "room": "Master",
+      "category": "Dresser",
+      "status": "Idea",
+      "sort": 1,
+      "price": null,
+      "qty": 1,
+      "store": null,
+      "link": null,
+      "notes": null,
+      "priority": 2,
+      "dimensions": {
+        "wIn": 60,
+        "dIn": 18
+      },
+      "specs": {
+        "width_in": 60,
+        "depth_in": 18,
+        "drawers": 6
+      },
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    }
+  ],
+  "options": [
+    {
+      "id": "o_3bd3932b-abc7-4346-8bcc-db69d6af1f2b",
+      "itemId": "i_86059dc9-a432-4305-bb60-9e0739efa8bc",
+      "title": "Dining table - West Elm 60x36",
+      "sort": 0,
+      "store": "West Elm",
+      "link": null,
+      "promoCode": null,
+      "price": 899,
+      "shipping": 149,
+      "taxEstimate": 90,
+      "discount": 0,
+      "dimensionsText": "60x36x30 in",
+      "notes": "Confirm seating and walkway clearance.",
+      "selected": false,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "o_e6c6e026-881a-4b73-945f-3baa3b78bca0",
+      "itemId": "i_861b9f03-4de2-45c0-b08e-987cd35ee231",
+      "title": "Sofa - Article Solae",
+      "sort": 0,
+      "store": "Article",
+      "link": "https://www.article.com/product/sofa",
+      "promoCode": null,
+      "price": 1999,
+      "shipping": 99,
+      "taxEstimate": 180,
+      "discount": 0,
+      "dimensionsText": "90x39x34 in",
+      "notes": "Check seat depth + fabric. Verify delivery window.",
+      "selected": false,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    },
+    {
+      "id": "o_ecd34fc1-3955-4765-a6bd-5ac6a99ca53f",
+      "itemId": "i_861b9f03-4de2-45c0-b08e-987cd35ee231",
+      "title": "Sofa - CB2 Range 2pc",
+      "sort": 1,
+      "store": "CB2",
+      "link": "https://www.cb2.com",
+      "promoCode": "WELCOME15",
+      "price": 2899,
+      "shipping": 199,
+      "taxEstimate": 260,
+      "discount": 150,
+      "dimensionsText": "92x64x32 in",
+      "notes": "Sectional layout - confirm chaise side works for plan.",
+      "selected": false,
+      "createdAt": 1770488186635,
+      "updatedAt": 1770488186635,
+      "provenance": {
+        "reviewStatus": null,
+        "modifiedFields": [],
+        "dataSource": null,
+        "sourceRef": null,
+        "lastEditedBy": "human",
+        "lastEditedAt": 1770488186635,
+        "verifiedAt": null,
+        "verifiedBy": null
+      }
+    }
+  ],
+  "exportMeta": {
+    "schemaVersion": 2,
+    "exportedAt": "2026-02-07T22:00:51.153Z",
+    "exportedBy": "human"
+  }
+}

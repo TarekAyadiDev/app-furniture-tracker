@@ -3,20 +3,37 @@ node_modules/
 
 # Build
 dist/
+dist-ssr/
 *.local
 
 # Env
 .env
 .env.*
 !.env.example
+.vercel/
+
+# Legacy secrets (do not commit)
+/config.js
+/public/config.js
 
 # Editor / OS
 .DS_Store
+logs/
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 .idea/
-.vscode/
+.vscode/*
+!.vscode/extensions.json
 *.swp
 *.swo
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
 
 # Vite
 *.local
