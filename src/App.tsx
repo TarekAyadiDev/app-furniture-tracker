@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { DataProvider } from "@/data/DataContext";
 import { AppShell } from "@/components/layout/AppShell";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Shopping from "@/pages/Shopping";
 import Items from "@/pages/Items";
 import ItemDetail from "@/pages/ItemDetail";
@@ -22,24 +23,26 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      <DataProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<AppShell />}>
-              <Route index element={<Navigate to="/shopping" replace />} />
-              <Route path="shopping" element={<Shopping />} />
-              <Route path="items" element={<Items />} />
-              <Route path="items/:id" element={<ItemDetail />} />
-              <Route path="rooms" element={<Rooms />} />
-              <Route path="rooms/:id" element={<RoomDetail />} />
-              <Route path="review" element={<Review />} />
-              <Route path="budget" element={<Budget />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="*" element={<NotFound />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </DataProvider>
+      <ErrorBoundary>
+        <DataProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<AppShell />}>
+                <Route index element={<Navigate to="/shopping" replace />} />
+                <Route path="shopping" element={<Shopping />} />
+                <Route path="items" element={<Items />} />
+                <Route path="items/:id" element={<ItemDetail />} />
+                <Route path="rooms" element={<Rooms />} />
+                <Route path="rooms/:id" element={<RoomDetail />} />
+                <Route path="review" element={<Review />} />
+                <Route path="budget" element={<Budget />} />
+                <Route path="settings" element={<Settings />} />
+                <Route path="*" element={<NotFound />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </DataProvider>
+      </ErrorBoundary>
     </TooltipProvider>
   </QueryClientProvider>
 );
