@@ -67,11 +67,12 @@ export async function listAllRecords(opts: {
   return records;
 }
 
-export async function createRecords(opts: { token: string; baseId: string; tableId: string; records: any[] }) {
-  const { token, baseId, tableId } = opts;
+export async function createRecords(opts: { token: string; baseId: string; tableId: string; records: any[]; typecast?: boolean }) {
+  const { token, baseId, tableId, typecast } = opts;
   const created: any[] = [];
   for (const batch of chunk(opts.records, 10)) {
-    const json = await airtableFetch(`${AIRTABLE_API}/${baseId}/${tableId}`, {
+    const url = typecast ? `${AIRTABLE_API}/${baseId}/${tableId}?typecast=true` : `${AIRTABLE_API}/${baseId}/${tableId}`;
+    const json = await airtableFetch(url, {
       method: "POST",
       token,
       body: JSON.stringify({ records: batch }),
@@ -81,11 +82,12 @@ export async function createRecords(opts: { token: string; baseId: string; table
   return created;
 }
 
-export async function updateRecords(opts: { token: string; baseId: string; tableId: string; records: any[] }) {
-  const { token, baseId, tableId } = opts;
+export async function updateRecords(opts: { token: string; baseId: string; tableId: string; records: any[]; typecast?: boolean }) {
+  const { token, baseId, tableId, typecast } = opts;
   const updated: any[] = [];
   for (const batch of chunk(opts.records, 10)) {
-    const json = await airtableFetch(`${AIRTABLE_API}/${baseId}/${tableId}`, {
+    const url = typecast ? `${AIRTABLE_API}/${baseId}/${tableId}?typecast=true` : `${AIRTABLE_API}/${baseId}/${tableId}`;
+    const json = await airtableFetch(url, {
       method: "PATCH",
       token,
       body: JSON.stringify({ records: batch }),
@@ -106,4 +108,3 @@ export async function deleteRecords(opts: { token: string; baseId: string; table
   }
   return deleted;
 }
-

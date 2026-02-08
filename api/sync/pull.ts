@@ -54,7 +54,18 @@ export default async function handler(req: any, res: any) {
 
   try {
     const { token, baseId, tableId, view } = getAirtableConfig();
-    const records = await listAllRecords({ token, baseId, tableId, view });
+    let records = await listAllRecords({ token, baseId, tableId, view });
+    if (view) {
+      const types = new Set(records.map((r) => String(r?.fields?.["Record Type"] || "").trim()));
+      const hasItem = types.has("Item");
+      const hasOption = types.has("Option");
+      const hasNote = types.has("Note");
+      const hasMeasurement = types.has("Measurement");
+      if (hasItem && (!hasOption || !hasNote || !hasMeasurement)) {
+        // Fallback: view may be filtering out Options/Notes/Measurements.
+        records = await listAllRecords({ token, baseId, tableId });
+      }
+    }
 
     const items: any[] = [];
     const options: any[] = [];
@@ -78,6 +89,7 @@ export default async function handler(req: any, res: any) {
           status: normalizeStatus(f["Status"]),
           sort: toNumber(meta?.sort),
           price: toNumber(f["Price"]),
+          selectedOptionId: typeof f["Selected Option Id"] === "string" ? f["Selected Option Id"] : null,
           discountType: typeof meta?.discountType === "string" ? meta.discountType : null,
           discountValue: toNumber(meta?.discountValue),
           qty: toNumber(f["Quantity"]) ? Math.round(toNumber(f["Quantity"]) as number) : 1,
@@ -95,7 +107,7 @@ export default async function handler(req: any, res: any) {
       }
 
       if (rt === "Option") {
-        const parentId = String(f["Parent Item Record Id"] || "").trim();
+        const parentId = String(f["Parent Item Record Id"] || f["Parent Item Key"] || "").trim();
         options.push({
           id: rec.id,
           remoteId: rec.id,

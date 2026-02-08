@@ -144,6 +144,9 @@ export default async function handler(req: any, res: any) {
         Notes: buildNotes(it.notes, meta),
         Dimensions: dimsToText(it.dimensions),
       };
+      if (typeof it.selectedOptionId === "string" && it.selectedOptionId) {
+        fields["Selected Option Id"] = it.selectedOptionId;
+      }
       fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
       fields[SYNC_AT_FIELD] = syncAtIso;
       if (typeof it.priority === "number") fields[PRIORITY_FIELD] = Math.round(it.priority);
@@ -155,7 +158,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const createdItemRecords = itemCreates.length ? await createRecords({ token, baseId, tableId, records: itemCreates }) : [];
+    const createdItemRecords = itemCreates.length ? await createRecords({ token, baseId, tableId, records: itemCreates, typecast: true }) : [];
     const itemIdMap: Record<string, string> = {};
     for (let i = 0; i < createdItemRecords.length; i++) {
       const localId = itemCreateLocalIds[i];
@@ -163,7 +166,7 @@ export default async function handler(req: any, res: any) {
       itemIdMap[localId] = createdItemRecords[i].id;
     }
 
-    const updatedItemRecords = itemUpdates.length ? await updateRecords({ token, baseId, tableId, records: itemUpdates }) : [];
+    const updatedItemRecords = itemUpdates.length ? await updateRecords({ token, baseId, tableId, records: itemUpdates, typecast: true }) : [];
 
     // --- Measurements ---
     const measCreates: any[] = [];
@@ -208,14 +211,14 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const createdMeasRecords = measCreates.length ? await createRecords({ token, baseId, tableId, records: measCreates }) : [];
+    const createdMeasRecords = measCreates.length ? await createRecords({ token, baseId, tableId, records: measCreates, typecast: true }) : [];
     const measurementIdMap: Record<string, string> = {};
     for (let i = 0; i < createdMeasRecords.length; i++) {
       const localId = measCreateLocalIds[i];
       if (!localId) continue;
       measurementIdMap[localId] = createdMeasRecords[i].id;
     }
-    const updatedMeasRecords = measUpdates.length ? await updateRecords({ token, baseId, tableId, records: measUpdates }) : [];
+    const updatedMeasRecords = measUpdates.length ? await updateRecords({ token, baseId, tableId, records: measUpdates, typecast: true }) : [];
 
     // --- Rooms (stored as Record Type = Note, one per room) ---
     const roomCreates: any[] = [];
@@ -248,14 +251,14 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const createdRoomRecords = roomCreates.length ? await createRecords({ token, baseId, tableId, records: roomCreates }) : [];
+    const createdRoomRecords = roomCreates.length ? await createRecords({ token, baseId, tableId, records: roomCreates, typecast: true }) : [];
     const roomIdMap: Record<string, string> = {};
     for (let i = 0; i < createdRoomRecords.length; i++) {
       const localId = roomCreateLocalIds[i];
       if (!localId) continue;
       roomIdMap[localId] = createdRoomRecords[i].id;
     }
-    const updatedRoomRecords = roomUpdates.length ? await updateRecords({ token, baseId, tableId, records: roomUpdates }) : [];
+    const updatedRoomRecords = roomUpdates.length ? await updateRecords({ token, baseId, tableId, records: roomUpdates, typecast: true }) : [];
 
     // --- Options ---
     const optCreates: any[] = [];
@@ -299,6 +302,7 @@ export default async function handler(req: any, res: any) {
         "Record Type": "Option",
         Title: String(o.title || "Option"),
         "Parent Item Record Id": parentRemote,
+        "Parent Item Key": parentLocal || null,
         Store: typeof o.store === "string" ? o.store : null,
         Link: typeof o.link === "string" ? o.link : null,
         "Promo Code": typeof o.promoCode === "string" ? o.promoCode : null,
@@ -323,7 +327,7 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const createdOptRecords = optCreates.length ? await createRecords({ token, baseId, tableId, records: optCreates }) : [];
+    const createdOptRecords = optCreates.length ? await createRecords({ token, baseId, tableId, records: optCreates, typecast: true }) : [];
     const optionIdMap: Record<string, string> = {};
     for (let i = 0; i < createdOptRecords.length; i++) {
       const localId = optCreateLocalIds[i];
@@ -331,7 +335,7 @@ export default async function handler(req: any, res: any) {
       optionIdMap[localId] = createdOptRecords[i].id;
     }
 
-    const updatedOptRecords = optUpdates.length ? await updateRecords({ token, baseId, tableId, records: optUpdates }) : [];
+    const updatedOptRecords = optUpdates.length ? await updateRecords({ token, baseId, tableId, records: optUpdates, typecast: true }) : [];
 
     // After creates, we can't reliably know which created option was selected without an id field.
     // We keep selection server-side via meta, but item.Selected Option Id is best-effort only.
