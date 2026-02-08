@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, ROOMS, type ItemStatus, type RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, type ItemStatus, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 
 type RoomFilter = RoomId | "All";
@@ -22,7 +22,7 @@ function includesText(haystack: string, needle: string) {
 
 export default function Items() {
   const nav = useNavigate();
-  const { rooms, items, options, reorderRooms, reorderItems } = useData();
+  const { orderedRooms, roomNameById, items, options, reorderRooms, reorderItems } = useData();
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -36,16 +36,7 @@ export default function Items() {
   const [reorderRoomsMode, setReorderRoomsMode] = useState(false);
   const [reorderRoomId, setReorderRoomId] = useState<RoomId | null>(null);
 
-  const orderedRoomIds = useMemo(() => {
-    const byId = new Map(rooms.filter((r) => r.syncState !== "deleted").map((r) => [r.id, r] as const));
-    const base = ROOMS.map((rid, idx) => {
-      const r = byId.get(rid);
-      const sort = typeof r?.sort === "number" ? r.sort : idx;
-      return { id: rid, sort, idx };
-    });
-    base.sort((a, b) => (a.sort !== b.sort ? a.sort - b.sort : a.idx - b.idx));
-    return base.map((x) => x.id);
-  }, [rooms]);
+  const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -89,10 +80,13 @@ export default function Items() {
 
   const byRoom = useMemo(() => {
     const map = new Map<RoomId, typeof filtered>();
-    for (const r of ROOMS) map.set(r, []);
-    for (const it of filtered) map.get(it.room)?.push(it);
-    for (const r of ROOMS) {
-      const list = map.get(r) || [];
+    for (const r of orderedRooms) map.set(r.id, []);
+    for (const it of filtered) {
+      if (!map.has(it.room)) map.set(it.room, []);
+      map.get(it.room)?.push(it);
+    }
+    for (const r of orderedRooms) {
+      const list = map.get(r.id) || [];
       list.sort((a, b) => {
         const sa = typeof a.sort === "number" ? a.sort : 999999;
         const sb = typeof b.sort === "number" ? b.sort : 999999;
@@ -102,10 +96,10 @@ export default function Items() {
         if (pa !== pb) return pa - pb;
         return b.updatedAt - a.updatedAt;
       });
-      map.set(r, list);
+      map.set(r.id, list);
     }
     return map;
-  }, [filtered]);
+  }, [filtered, orderedRooms]);
 
   const optionSummaryByItem = useMemo(() => {
     const m = new Map<
@@ -179,7 +173,7 @@ export default function Items() {
                   <option value="All">All</option>
                   {orderedRoomIds.map((r) => (
                     <option key={r} value={r}>
-                      {r}
+                      {roomNameById.get(r) || r}
                     </option>
                   ))}
                 </select>
@@ -250,7 +244,7 @@ export default function Items() {
             <AccordionItem key={r} value={r} className="rounded-lg border bg-background px-4">
               <AccordionTrigger className="py-3 hover:no-underline">
                 <div className="flex w-full items-baseline justify-between gap-3 pr-2 text-left">
-                  <div className="text-sm font-semibold">{r}</div>
+                  <div className="text-sm font-semibold">{roomNameById.get(r) || r}</div>
                   <div className="text-xs text-muted-foreground">{group.length}</div>
                 </div>
               </AccordionTrigger>
@@ -353,7 +347,7 @@ export default function Items() {
           <div className="mt-3">
             <DragReorderList
               ariaLabel="Reorder rooms"
-              items={orderedRoomIds.map((rid) => ({ id: rid, title: rid }))}
+              items={orderedRooms.map((room) => ({ id: room.id, title: roomNameById.get(room.id) || room.name || room.id }))}
               onCommit={async (ids) => {
                 await reorderRooms(ids as RoomId[]);
               }}

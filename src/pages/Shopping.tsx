@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
-import { ROOMS, type ItemStatus, type RoomId } from "@/lib/domain";
+import { type ItemStatus, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 
@@ -36,35 +36,28 @@ function pushRecent(key: string, value: string, max = 6) {
 export default function Shopping() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { rooms, items, createItem } = useData();
+  const { orderedRooms, roomNameById, items, createItem } = useData();
 
-  const orderedRoomIds = useMemo(() => {
-    const byId = new Map(rooms.filter((r) => r.syncState !== "deleted").map((r) => [r.id, r] as const));
-    const base = ROOMS.map((rid, idx) => {
-      const r = byId.get(rid);
-      const sort = typeof r?.sort === "number" ? r.sort : idx;
-      return { id: rid, sort, idx };
-    });
-    base.sort((a, b) => (a.sort !== b.sort ? a.sort - b.sort : a.idx - b.idx));
-    return base.map((x) => x.id);
-  }, [rooms]);
+  const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
+  const validRoomIds = useMemo(() => new Set(orderedRoomIds), [orderedRoomIds]);
 
   const nameRef = useRef<HTMLInputElement | null>(null);
 
   const [name, setName] = useState("");
-  const [room, setRoom] = useState<RoomId>(() => {
-    const r = loadRecents(RECENT_ROOMS_KEY)[0];
-    return (ROOMS as readonly string[]).includes(r) ? (r as RoomId) : "Living";
-  });
+  const [room, setRoom] = useState<RoomId>(() => loadRecents(RECENT_ROOMS_KEY)[0] || "Living");
   const [status, setStatus] = useState<ItemStatus>("Shortlist");
   const [price, setPrice] = useState<string>("");
   const [store, setStore] = useState<string>(() => loadRecents(RECENT_STORES_KEY)[0] || "");
   const [notes, setNotes] = useState<string>("");
 
-  const [recentRooms, setRecentRooms] = useState<string[]>(() =>
-    loadRecents(RECENT_ROOMS_KEY).filter((r) => (ROOMS as readonly string[]).includes(r)),
-  );
+  const [recentRooms, setRecentRooms] = useState<string[]>(() => loadRecents(RECENT_ROOMS_KEY));
   const [recentStores, setRecentStores] = useState<string[]>(() => loadRecents(RECENT_STORES_KEY));
+
+  useEffect(() => {
+    if (!orderedRoomIds.length) return;
+    setRoom((cur) => (validRoomIds.has(cur) ? cur : orderedRoomIds[0]));
+    setRecentRooms(loadRecents(RECENT_ROOMS_KEY).filter((r) => validRoomIds.has(r)));
+  }, [orderedRoomIds, validRoomIds]);
 
   const recentItems = useMemo(() => {
     return [...items]
@@ -95,7 +88,7 @@ export default function Shopping() {
 
     pushRecent(RECENT_ROOMS_KEY, room);
     if (store.trim()) pushRecent(RECENT_STORES_KEY, store.trim());
-    setRecentRooms(loadRecents(RECENT_ROOMS_KEY).filter((r) => (ROOMS as readonly string[]).includes(r)));
+    setRecentRooms(loadRecents(RECENT_ROOMS_KEY).filter((r) => validRoomIds.has(r)));
     setRecentStores(loadRecents(RECENT_STORES_KEY));
 
     setName("");
@@ -103,7 +96,7 @@ export default function Shopping() {
     setNotes("");
     nameRef.current?.focus();
 
-    toast({ title: "Added", description: `${trimmed} \u00b7 ${room} \u00b7 ${status}` });
+    toast({ title: "Added", description: `${trimmed} \u00b7 ${roomNameById.get(room) || room} \u00b7 ${status}` });
 
     if (openAfter) nav(`/items/${id}`);
   }
@@ -138,7 +131,7 @@ export default function Shopping() {
               >
                 {orderedRoomIds.map((r) => (
                   <option key={r} value={r}>
-                    {r}
+                    {roomNameById.get(r) || r}
                   </option>
                 ))}
               </select>
@@ -222,7 +215,7 @@ export default function Shopping() {
                     onClick={() => setRoom(r as RoomId)}
                     className="rounded-full border bg-background px-3 py-2 text-sm hover:text-foreground"
                   >
-                    {r}
+                    {roomNameById.get(r as RoomId) || r}
                   </button>
                 ))}
               </div>
@@ -263,7 +256,7 @@ export default function Shopping() {
                   <div className="min-w-0">
                     <div className="truncate text-base font-semibold">{it.name}</div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {it.room}
+                      {roomNameById.get(it.room) || it.room}
                       {it.store ? ` \u00b7 ${it.store}` : ""}
                       {it.price ? ` \u00b7 ${formatMoneyUSD(it.price)}` : ""}
                     </div>

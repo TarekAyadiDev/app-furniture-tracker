@@ -54,7 +54,7 @@ export default async function handler(req: any, res: any) {
     const rooms = Array.isArray(body.rooms) ? body.rooms : [];
 
     const { token, baseId, tableId } = getAirtableConfig();
-    const PRIORITY_FIELD = process.env.AIRTABLE_PRIORITY_FIELD || "Prioirity";
+    const PRIORITY_FIELD = process.env.AIRTABLE_PRIORITY_FIELD || "Priority";
 
     // --- Items ---
     const itemCreates: any[] = [];

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { DataSourceBadge } from "@/components/DataSourceBadge";
 import { ReviewStatusBadge } from "@/components/ReviewStatusBadge";
@@ -10,10 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, ROOMS, type DataSource, type Item, type ItemStatus, type Option, type ReviewStatus, type RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, type DataSource, type Item, type ItemStatus, type Option, type ReviewStatus, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, nowMs, parseNumberOrNull } from "@/lib/format";
 import { computeItemFitWarnings } from "@/lib/fit";
 import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provenance";
+import { useToast } from "@/hooks/use-toast";
+import { shareData } from "@/lib/share";
+import { addAttachment, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 
 function optionFinalTotal(o: Option) {
   return (o.price || 0) + (o.shipping || 0) + (o.taxEstimate || 0) - (o.discount || 0);
@@ -59,19 +62,23 @@ export default function ItemDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const loc = useLocation();
-  const { rooms, measurements, items, options, reorderOptions, renameCategory, updateItem, deleteItem, createOption, updateOption, deleteOption } =
-    useData();
+  const { toast } = useToast();
+  const {
+    orderedRooms,
+    roomNameById,
+    measurements,
+    items,
+    options,
+    reorderOptions,
+    renameCategory,
+    updateItem,
+    deleteItem,
+    createOption,
+    updateOption,
+    deleteOption,
+  } = useData();
 
-  const orderedRoomIds = useMemo(() => {
-    const byId = new Map(rooms.filter((r) => r.syncState !== "deleted").map((r) => [r.id, r] as const));
-    const base = ROOMS.map((rid, idx) => {
-      const r = byId.get(rid);
-      const sort = typeof r?.sort === "number" ? r.sort : idx;
-      return { id: rid, sort, idx };
-    });
-    base.sort((a, b) => (a.sort !== b.sort ? a.sort - b.sort : a.idx - b.idx));
-    return base.map((x) => x.id);
-  }, [rooms]);
+  const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
 
   const item = useMemo(() => items.find((x) => x.id === id), [items, id]);
   const itemOptions = useMemo(
@@ -86,6 +93,9 @@ export default function ItemDetail() {
         }),
     [options, id],
   );
+
+  const [itemAttachments, setItemAttachments] = useState<AttachmentRecord[]>([]);
+  const [optionAttachments, setOptionAttachments] = useState<Record<string, AttachmentRecord[]>>({});
 
   const [name, setName] = useState("");
   const [room, setRoom] = useState<RoomId>("Living");
@@ -137,6 +147,45 @@ export default function ItemDetail() {
     setReviewStatus(item.provenance?.reviewStatus ?? null);
   }, [item?.id]);
 
+  useEffect(() => {
+    if (!item) return;
+    let active = true;
+    listAttachments("item", item.id)
+      .then((rows) => {
+        if (active) setItemAttachments(rows);
+      })
+      .catch(() => {
+        if (active) setItemAttachments([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [item?.id]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadOptionAttachments() {
+      if (!itemOptions.length) {
+        if (active) setOptionAttachments({});
+        return;
+      }
+      const entries = await Promise.all(
+        itemOptions.map(async (opt) => {
+          const rows = await listAttachments("option", opt.id);
+          return [opt.id, rows] as const;
+        }),
+      );
+      if (!active) return;
+      const next: Record<string, AttachmentRecord[]> = {};
+      for (const [optId, rows] of entries) next[optId] = rows;
+      setOptionAttachments(next);
+    }
+    void loadOptionAttachments();
+    return () => {
+      active = false;
+    };
+  }, [itemOptions]);
+
   if (!id) return null;
   if (!item) {
     return (
@@ -162,14 +211,101 @@ export default function ItemDetail() {
 
   async function onDeleteItem() {
     if (!confirm(`Delete "${item.name}"?`)) return;
+    const itemAtts = itemAttachments.length ? itemAttachments : await listAttachments("item", item.id);
+    await Promise.all(itemAtts.map((att) => deleteAttachment(att.id)));
+    for (const opt of itemOptions) {
+      const optAtts = optionAttachments[opt.id] || (await listAttachments("option", opt.id));
+      await Promise.all(optAtts.map((att) => deleteAttachment(att.id)));
+    }
     await deleteItem(item.id);
     nav("/items");
+  }
+
+  async function onDeleteOption(opt: Option) {
+    const optAtts = optionAttachments[opt.id] || (await listAttachments("option", opt.id));
+    await Promise.all(optAtts.map((att) => deleteAttachment(att.id)));
+    await deleteOption(opt.id);
+  }
+
+  async function onShareItem() {
+    const roomLabel = roomNameById.get(item.room) || item.room;
+    const parts = [
+      item.name,
+      roomLabel ? `Room: ${roomLabel}` : "",
+      item.status ? `Status: ${item.status}` : "",
+      item.price ? `Price: ${formatMoneyUSD(item.price)}` : "",
+      item.store ? `Store: ${item.store}` : "",
+      item.link ? `Link: ${item.link}` : "",
+    ].filter(Boolean);
+    const text = parts.join("\n");
+    const url = item.link || (typeof window !== "undefined" ? window.location.href : undefined);
+    try {
+      const res = await shareData({ title: item.name, text, url });
+      const label = res.method === "share" ? "Shared" : res.method === "clipboard" ? "Copied" : "Ready";
+      toast({ title: label, description: "Item details ready to share." });
+    } catch (err: any) {
+      toast({ title: "Share failed", description: err?.message || "Unable to share this item." });
+    }
+  }
+
+  async function onShareOption(opt: Option) {
+    const roomLabel = roomNameById.get(item.room) || item.room;
+    const total = optionFinalTotal(opt);
+    const parts = [
+      `${opt.title} (${item.name})`,
+      roomLabel ? `Room: ${roomLabel}` : "",
+      opt.store ? `Store: ${opt.store}` : "",
+      total ? `Total: ${formatMoneyUSD(total)}` : "",
+      opt.link ? `Link: ${opt.link}` : "",
+    ].filter(Boolean);
+    const text = parts.join("\n");
+    const url = opt.link || item.link || (typeof window !== "undefined" ? window.location.href : undefined);
+    try {
+      const res = await shareData({ title: opt.title, text, url });
+      const label = res.method === "share" ? "Shared" : res.method === "clipboard" ? "Copied" : "Ready";
+      toast({ title: label, description: "Option details ready to share." });
+    } catch (err: any) {
+      toast({ title: "Share failed", description: err?.message || "Unable to share this option." });
+    }
   }
 
   async function onAddOption() {
     const title = prompt("Option title (e.g. IKEA - MALM dresser)")?.trim();
     if (!title) return;
     await createOption({ itemId: item.id, title });
+  }
+
+  async function refreshAttachments(parentType: "item" | "option", parentId: string) {
+    const rows = await listAttachments(parentType, parentId);
+    if (parentType === "item") {
+      setItemAttachments(rows);
+    } else {
+      setOptionAttachments((cur) => ({ ...cur, [parentId]: rows }));
+    }
+  }
+
+  async function handleAddAttachments(parentType: "item" | "option", parentId: string, files: FileList | null) {
+    if (!files || !files.length) return;
+    const existing = parentType === "item" ? itemAttachments : optionAttachments[parentId] || [];
+    const remainingSlots = 3 - existing.length;
+    if (remainingSlots <= 0) {
+      toast({ title: "Limit reached", description: "Up to 3 photos per item/option." });
+      return;
+    }
+    const incoming = Array.from(files)
+      .filter((f) => f.type.startsWith("image/"))
+      .slice(0, remainingSlots);
+    if (!incoming.length) {
+      toast({ title: "Unsupported file", description: "Please choose an image file." });
+      return;
+    }
+    await Promise.all(incoming.map((file) => addAttachment(parentType, parentId, file)));
+    await refreshAttachments(parentType, parentId);
+  }
+
+  async function handleRemoveAttachment(parentType: "item" | "option", parentId: string, attachmentId: string) {
+    await deleteAttachment(attachmentId);
+    await refreshAttachments(parentType, parentId);
   }
 
   async function onSelectOption(optionId: string) {
@@ -212,7 +348,7 @@ export default function ItemDetail() {
       <Card className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">{item.room}</div>
+            <div className="text-xs text-muted-foreground">{roomNameById.get(item.room) || item.room}</div>
             <div className="truncate text-lg font-semibold">{item.name}</div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={item.status} />
@@ -228,9 +364,14 @@ export default function ItemDetail() {
               </div>
             ) : null}
           </div>
-          <Button variant="destructive" onClick={() => void onDeleteItem()}>
-            Delete
-          </Button>
+          <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+            <Button variant="secondary" onClick={() => void onShareItem()}>
+              Share
+            </Button>
+            <Button variant="destructive" onClick={() => void onDeleteItem()}>
+              Delete
+            </Button>
+          </div>
         </div>
 
         <div className="mt-4 space-y-3">
@@ -374,7 +515,7 @@ export default function ItemDetail() {
               >
                 {orderedRoomIds.map((r) => (
                   <option key={r} value={r}>
-                    {r}
+                    {roomNameById.get(r) || r}
                   </option>
                 ))}
               </select>
@@ -545,7 +686,7 @@ export default function ItemDetail() {
                   ))}
                 </div>
                 <div className="mt-3">
-                  <Button variant="secondary" onClick={() => nav(`/rooms/${item.room}`)}>
+                  <Button variant="secondary" onClick={() => nav(`/rooms/${encodeURIComponent(item.room)}`)}>
                     Open room measurements
                   </Button>
                 </div>
@@ -654,6 +795,13 @@ export default function ItemDetail() {
               className="min-h-[120px] text-base"
             />
           </div>
+
+          <AttachmentGallery
+            label="Item photos"
+            attachments={itemAttachments}
+            onAdd={(files) => void handleAddAttachments("item", item.id, files)}
+            onRemove={(attId) => void handleRemoveAttachment("item", item.id, attId)}
+          />
         </div>
       </Card>
 
@@ -733,13 +881,16 @@ export default function ItemDetail() {
                       <Button variant={o.selected ? "default" : "secondary"} onClick={() => void onSelectOption(o.id)}>
                         {o.selected ? "Selected" : "Select"}
                       </Button>
+                      <Button variant="secondary" onClick={() => void onShareOption(o)}>
+                        Share
+                      </Button>
                       <Button
                         variant="secondary"
                         onClick={() => setOpenOpt((cur) => ({ ...cur, [o.id]: !cur[o.id] }))}
                       >
                         {openOpt[o.id] ? "Hide" : "Edit"}
                       </Button>
-                      <Button variant="destructive" onClick={() => void deleteOption(o.id)}>
+                      <Button variant="destructive" onClick={() => void onDeleteOption(o)}>
                         Delete
                       </Button>
                     </div>
@@ -896,6 +1047,13 @@ export default function ItemDetail() {
                           onBlur={(e) => void updateOption(o.id, { notes: e.target.value.trim() || null })}
                         />
                       </div>
+
+                      <AttachmentGallery
+                        label="Option photos"
+                        attachments={optionAttachments[o.id] || []}
+                        onAdd={(files) => void handleAddAttachments("option", o.id, files)}
+                        onRemove={(attId) => void handleRemoveAttachment("option", o.id, attId)}
+                      />
                     </div>
                   ) : null}
                 </Card>
@@ -917,6 +1075,85 @@ export default function ItemDetail() {
           </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+function AttachmentGallery({
+  label,
+  attachments,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  attachments: AttachmentRecord[];
+  onAdd: (files: FileList | null) => void;
+  onRemove: (id: string) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const max = 3;
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const att of attachments) {
+      next[att.id] = URL.createObjectURL(att.blob);
+    }
+    setUrls(next);
+    return () => {
+      Object.values(next).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [attachments]);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label>{label}</Label>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          onClick={() => fileRef.current?.click()}
+          disabled={attachments.length >= max}
+        >
+          Add photo
+        </Button>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          onAdd(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      {attachments.length ? (
+        <div className="flex flex-wrap gap-2">
+          {attachments.map((att) => (
+            <div key={att.id} className="relative h-24 w-24 overflow-hidden rounded-md border bg-background">
+              {urls[att.id] ? (
+                <img src={urls[att.id]} alt={att.name || "Attachment"} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">Loading</div>
+              )}
+              <button
+                type="button"
+                onClick={() => onRemove(att.id)}
+                className="absolute right-1 top-1 rounded-full border bg-background px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                aria-label="Remove photo"
+              >
+                \u00d7
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">No photos yet.</div>
+      )}
+      <div className="text-xs text-muted-foreground">Up to {max} photos.</div>
     </div>
   );
 }

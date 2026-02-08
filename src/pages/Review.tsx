@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useData } from "@/data/DataContext";
 import type { DataSource, ReviewStatus, RoomId } from "@/lib/domain";
-import { ROOMS } from "@/lib/domain";
 import { nowMs } from "@/lib/format";
 import { markProvenanceNeedsReview, markProvenanceVerified, reviewStatusNeedsAttention } from "@/lib/provenance";
 
@@ -81,7 +80,7 @@ function truncate(text: string, max = 72) {
 
 export default function Review() {
   const nav = useNavigate();
-  const { rooms, measurements, items, options, updateMeasurement, updateItem, updateOption } = useData();
+  const { orderedRooms, roomNameById, measurements, items, options, updateMeasurement, updateItem, updateOption } = useData();
 
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState<TypeFilter>("All");
@@ -91,16 +90,7 @@ export default function Review() {
   const [busy, setBusy] = useState(false);
   const [openChanges, setOpenChanges] = useState<Record<string, boolean>>({});
 
-  const orderedRoomIds = useMemo(() => {
-    const byId = new Map(rooms.filter((r) => r.syncState !== "deleted").map((r) => [r.id, r] as const));
-    const base = ROOMS.map((rid, idx) => {
-      const r = byId.get(rid);
-      const sort = typeof r?.sort === "number" ? r.sort : idx;
-      return { id: rid, sort, idx };
-    });
-    base.sort((a, b) => (a.sort !== b.sort ? a.sort - b.sort : a.idx - b.idx));
-    return base.map((x) => x.id);
-  }, [rooms]);
+  const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
 
   const itemById = useMemo(() => new Map(items.map((it) => [it.id, it] as const)), [items]);
 
@@ -117,8 +107,8 @@ export default function Review() {
         id: m.id,
         room: m.room,
         title: m.label,
-        subtitle: `Room: ${m.room}`,
-        href: `/rooms/${m.room}?editMeasurement=${encodeURIComponent(m.id)}`,
+        subtitle: `Room: ${roomNameById.get(m.room) || m.room}`,
+        href: `/rooms/${encodeURIComponent(m.room)}?editMeasurement=${encodeURIComponent(m.id)}`,
         reviewStatus: status || "needs_review",
         dataSource: m.provenance?.dataSource ?? null,
         sourceRef: m.provenance?.sourceRef ?? null,
@@ -137,7 +127,7 @@ export default function Review() {
         id: it.id,
         room: it.room,
         title: it.name,
-        subtitle: `Room: ${it.room} \u00b7 ${it.category}`,
+        subtitle: `Room: ${roomNameById.get(it.room) || it.room} \u00b7 ${it.category}`,
         href: `/items/${it.id}`,
         reviewStatus: status || "needs_review",
         dataSource: it.provenance?.dataSource ?? null,
@@ -159,7 +149,9 @@ export default function Review() {
         id: op.id,
         room,
         title: op.title,
-        subtitle: parent ? `${parent.name} \u00b7 ${room ?? "Unknown room"}` : "Unknown item",
+        subtitle: parent
+          ? `${parent.name} \u00b7 ${room ? roomNameById.get(room) || room : "Unknown room"}`
+          : "Unknown item",
         href: parent ? `/items/${parent.id}?option=${encodeURIComponent(op.id)}` : `/items/${encodeURIComponent(op.itemId)}`,
         reviewStatus: status || "needs_review",
         dataSource: op.provenance?.dataSource ?? null,
@@ -178,7 +170,7 @@ export default function Review() {
     });
 
     return out;
-  }, [itemById, items, measurements, options]);
+  }, [itemById, items, measurements, options, roomNameById]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -300,7 +292,7 @@ export default function Review() {
                 <option value="All">All</option>
                 {orderedRoomIds.map((r) => (
                   <option key={r} value={r}>
-                    {r}
+                    {roomNameById.get(r) || r}
                   </option>
                 ))}
               </select>

@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
-import { ROOMS, type DataSource, type Measurement, type ReviewStatus, type RoomId } from "@/lib/domain";
+import { type DataSource, type Measurement, type ReviewStatus, type RoomId } from "@/lib/domain";
 import { cmToInches, formatInAndCm, inchesToCm, nowMs, parseNumberOrNull } from "@/lib/format";
 import { computeItemFitWarnings, formatDimsCompact, formatRectInAndCm, getItemDimsIn, pickRoomGlobalDims } from "@/lib/fit";
 import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provenance";
@@ -27,11 +27,24 @@ export default function RoomDetail() {
   const { id } = useParams();
   const nav = useNavigate();
   const loc = useLocation();
-  const { planner, rooms, items, measurements, reorderMeasurements, updateRoom, createMeasurement, updateMeasurement, deleteMeasurement } =
-    useData();
+  const {
+    planner,
+    rooms,
+    roomNameById,
+    unitPreference,
+    setUnitPreference,
+    items,
+    measurements,
+    reorderMeasurements,
+    updateRoom,
+    createMeasurement,
+    updateMeasurement,
+    deleteMeasurement,
+  } = useData();
 
-  const roomId = (ROOMS as readonly string[]).includes(String(id)) ? (id as RoomId) : null;
-  const room = useMemo(() => rooms.find((r) => r.id === roomId), [rooms, roomId]);
+  const roomId = typeof id === "string" ? (id as RoomId) : null;
+  const room = useMemo(() => rooms.find((r) => r.id === roomId && r.syncState !== "deleted"), [rooms, roomId]);
+  const roomLabel = roomId ? roomNameById.get(roomId) || roomId : "";
   const list = useMemo(() => {
     if (!roomId) return [];
     return measurements
@@ -47,7 +60,6 @@ export default function RoomDetail() {
   const [notes, setNotes] = useState(room?.notes || "");
   const [newLabel, setNewLabel] = useState("");
   const [newValue, setNewValue] = useState("");
-  const [newUnit, setNewUnit] = useState<Unit>("in");
   const [newConfidence, setNewConfidence] = useState<Measurement["confidence"]>("med");
   const [newForCategory, setNewForCategory] = useState("");
   const [newNotes, setNewNotes] = useState("");
@@ -82,7 +94,7 @@ export default function RoomDetail() {
     const lbl = newLabel.trim();
     const val = parseNumberOrNull(newValue);
     if (!lbl || val === null) return;
-    const valueIn = newUnit === "cm" ? cmToInches(val) : val;
+    const valueIn = unitPreference === "cm" ? cmToInches(val) : val;
     const ts = nowMs();
     const baseProv = {
       dataSource: newDataSource,
@@ -118,7 +130,7 @@ export default function RoomDetail() {
       id: m.id,
       label: m.label,
       value: String(m.valueIn),
-      unit: "in",
+      unit: unitPreference,
       confidence: m.confidence || null,
       forCategory: m.forCategory || "",
       notes: m.notes || "",
@@ -174,7 +186,7 @@ export default function RoomDetail() {
       id: match.id,
       label: match.label,
       value: String(match.valueIn),
-      unit: "in",
+      unit: unitPreference,
       confidence: match.confidence || null,
       forCategory: match.forCategory || "",
       notes: match.notes || "",
@@ -184,6 +196,10 @@ export default function RoomDetail() {
     });
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
   }, [editMeasurementId, editing, list, loc.pathname, nav]);
+
+  useEffect(() => {
+    setEditing((cur) => (cur ? { ...cur, unit: unitPreference } : cur));
+  }, [unitPreference]);
 
   const itemsInRoom = useMemo(() => {
     if (!roomId) return [];
@@ -268,7 +284,7 @@ export default function RoomDetail() {
     <div className="space-y-4">
       <Card className="p-4">
         <div className="flex items-baseline justify-between gap-3">
-          <div className="text-base font-semibold">{roomId}</div>
+          <div className="text-base font-semibold">{roomLabel}</div>
           {globalSizeText ? <div className="text-xs text-muted-foreground">{globalSizeText}</div> : null}
         </div>
         <div className="mt-3 space-y-1.5">
@@ -366,7 +382,7 @@ export default function RoomDetail() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-sm font-semibold">Measurements</div>
-            <div className="text-xs text-muted-foreground">Stored in inches; always displayed in both units.</div>
+            <div className="text-xs text-muted-foreground">Stored in inches; entry unit is global (set here or in Settings).</div>
           </div>
         </div>
 
@@ -389,12 +405,12 @@ export default function RoomDetail() {
               inputMode="decimal"
               value={newValue}
               onChange={(e) => setNewValue(e.target.value)}
-              placeholder={newUnit === "in" ? "inches" : "cm"}
+              placeholder={unitPreference === "in" ? "inches" : "cm"}
               className="h-12 text-base"
             />
             {parseNumberOrNull(newValue) !== null ? (
               <div className="text-xs text-muted-foreground">
-                {newUnit === "in"
+                {unitPreference === "in"
                   ? `${inchesToCm(parseNumberOrNull(newValue) || 0).toFixed(1)} cm`
                   : `${cmToInches(parseNumberOrNull(newValue) || 0).toFixed(1)} in`}
               </div>
@@ -404,8 +420,8 @@ export default function RoomDetail() {
             <Label htmlFor="m_unit">Unit</Label>
             <select
               id="m_unit"
-              value={newUnit}
-              onChange={(e) => setNewUnit(e.target.value as Unit)}
+              value={unitPreference}
+              onChange={(e) => void setUnitPreference(e.target.value === "cm" ? "cm" : "in")}
               className="h-12 w-full rounded-md border bg-background px-3 text-base"
             >
               <option value="in">in</option>
@@ -533,7 +549,11 @@ export default function RoomDetail() {
                 <Label>Unit</Label>
                 <select
                   value={editing.unit}
-                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, unit: e.target.value as Unit } : cur))}
+                  onChange={(e) => {
+                    const next = e.target.value as Unit;
+                    void setUnitPreference(next);
+                    setEditing((cur) => (cur ? { ...cur, unit: next } : cur));
+                  }}
                   className="h-11 w-full rounded-md border bg-background px-3 text-base"
                 >
                   <option value="in">in</option>
@@ -779,7 +799,7 @@ export default function RoomDetail() {
         {reorderMode && list.length ? (
           <div className="mt-3">
             <DragReorderList
-              ariaLabel={`Reorder measurements in ${roomId}`}
+              ariaLabel={`Reorder measurements in ${roomLabel || roomId}`}
               items={list.map((m) => ({
                 id: m.id,
                 title: m.label,

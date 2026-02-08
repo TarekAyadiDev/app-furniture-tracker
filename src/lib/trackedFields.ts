@@ -93,6 +93,7 @@ export const OPTION_TRACKED_FIELDS: TrackedFieldSpec<Option>[] = [
 ];
 
 export const ROOM_TRACKED_FIELDS: TrackedFieldSpec<Room>[] = [
+  { field: "name", get: (r) => r.name, normalize: normalizeString },
   { field: "sort", get: (r) => r.sort, normalize: normalizeOptionalNumber },
   { field: "notes", get: (r) => r.notes, normalize: normalizeOptionalString },
   { field: "provenance.dataSource", get: (r) => r.provenance?.dataSource, normalize: normalizeDataSource },

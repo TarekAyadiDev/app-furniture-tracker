@@ -55,7 +55,8 @@ async function rekeyMeasurement(localId: string, remoteId: string) {
 async function applyPulledBundle(bundle: ExportBundleV1) {
   // Upsert remote records into local DB and mark them clean.
   for (const r of bundle.rooms || []) {
-    const room: Room = { ...r, syncState: "clean", remoteId: r.remoteId || r.id || null };
+    const name = (r as any).name || r.id;
+    const room: Room = { ...r, name, syncState: "clean", remoteId: r.remoteId || r.id || null };
     await idbPut("rooms", room);
   }
   for (const m of bundle.measurements || []) {
@@ -132,8 +133,19 @@ export async function syncNow() {
   if (!pullRes.ok || !pullJson.ok || !pullJson.bundle) throw new Error(pullJson.message || "Sync pull failed");
   await applyPulledBundle(pullJson.bundle);
 
+  const summary = {
+    push: pushJson.counts || {},
+    pull: {
+      items: pullJson.bundle.items.length,
+      options: pullJson.bundle.options.length,
+      measurements: pullJson.bundle.measurements.length,
+      rooms: pullJson.bundle.rooms.length,
+    },
+  };
+
   await idbSetMeta("lastSyncAt", Date.now());
+  await idbSetMeta("lastSyncSummary", summary);
   notifyDbChanged();
 
-  return { push: pushJson.counts || {}, pull: { items: pullJson.bundle.items.length, options: pullJson.bundle.options.length } };
+  return summary;
 }

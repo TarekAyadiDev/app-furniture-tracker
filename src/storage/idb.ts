@@ -1,9 +1,9 @@
 import type { Item, Measurement, Option, Room } from "@/lib/domain";
 
 const DB_NAME = "furnishing-tracker";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
-type StoreName = "items" | "options" | "measurements" | "rooms" | "meta";
+type StoreName = "items" | "options" | "measurements" | "rooms" | "meta" | "attachments";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -36,6 +36,12 @@ function openDb(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains("rooms")) {
         const store = db.createObjectStore("rooms", { keyPath: "id" });
+        store.createIndex("updatedAt", "updatedAt", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains("attachments")) {
+        const store = db.createObjectStore("attachments", { keyPath: "id" });
+        store.createIndex("parentKey", "parentKey", { unique: false });
         store.createIndex("updatedAt", "updatedAt", { unique: false });
       }
 
@@ -95,6 +101,10 @@ export async function idbGetAll<T>(store: StoreName): Promise<T[]> {
   return await withStore<T[]>(store, "readonly", (s) => s.getAll());
 }
 
+export async function idbGetAllByIndex<T>(store: StoreName, index: string, value: IDBValidKey | IDBKeyRange): Promise<T[]> {
+  return await withStore<T[]>(store, "readonly", (s) => s.index(index).getAll(value));
+}
+
 export async function idbGet<T>(store: StoreName, key: string): Promise<T | undefined> {
   return (await withStore<T | undefined>(store, "readonly", (s) => s.get(key))) as T | undefined;
 }
@@ -120,11 +130,12 @@ export async function idbBulkPut<T>(store: StoreName, values: T[]): Promise<void
 }
 
 export async function idbResetAll(): Promise<void> {
-  await withTx(["items", "options", "measurements", "rooms", "meta"], "readwrite", async (tx) => {
+  await withTx(["items", "options", "measurements", "rooms", "attachments", "meta"], "readwrite", async (tx) => {
     tx.objectStore("items").clear();
     tx.objectStore("options").clear();
     tx.objectStore("measurements").clear();
     tx.objectStore("rooms").clear();
+    tx.objectStore("attachments").clear();
     tx.objectStore("meta").clear();
     return;
   });

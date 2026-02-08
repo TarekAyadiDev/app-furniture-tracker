@@ -1,4 +1,4 @@
-export const ROOMS = [
+export const DEFAULT_ROOMS = [
   "Living",
   "Dining",
   "Master",
@@ -9,7 +9,7 @@ export const ROOMS = [
   "Bath",
 ] as const;
 
-export type RoomId = (typeof ROOMS)[number];
+export type RoomId = string;
 
 export const ITEM_STATUSES = [
   "Idea",
@@ -137,6 +137,7 @@ export type Measurement = {
 
 export type Room = {
   id: RoomId;
+  name: string;
   remoteId?: string | null;
   syncState?: SyncState;
 

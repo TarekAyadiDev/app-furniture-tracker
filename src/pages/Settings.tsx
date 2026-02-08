@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
 import { useToast } from "@/hooks/use-toast";
 import { syncNow } from "@/sync/syncNow";
-import { ROOMS, type RoomId } from "@/lib/domain";
+import type { RoomId } from "@/lib/domain";
+import { normalizeRoomName } from "@/lib/rooms";
 
 type Health = { ok: boolean; airtableConfigured: boolean; message?: string };
 
@@ -28,9 +29,14 @@ function downloadJson(filename: string, obj: unknown) {
   URL.revokeObjectURL(url);
 }
 
-function parseMarkdownTasks(text: string) {
+function parseMarkdownTasks(text: string, rooms: Array<{ id: RoomId; name: string }>, fallbackRoom: RoomId) {
   const items: Array<{ title: string; room: RoomId; priority?: number; status: string; category?: string }> = [];
-  const roomTags = new Map<string, RoomId>(ROOMS.map((r) => [r.toLowerCase(), r]));
+  const roomTags = new Map<string, RoomId>();
+  for (const r of rooms) {
+    const name = normalizeRoomName(r.name || r.id);
+    if (name) roomTags.set(name.toLowerCase(), r.id);
+    roomTags.set(String(r.id).toLowerCase(), r.id);
+  }
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -41,7 +47,7 @@ function parseMarkdownTasks(text: string) {
     let body = String(m[2] || "").trim();
     const tags = body.match(/#[A-Za-z0-9_]+/g) || [];
 
-    let room: RoomId = "Living";
+    let room: RoomId = fallbackRoom;
     let priority: number | undefined;
 
     for (const tagRaw of tags) {
@@ -74,9 +80,31 @@ function parseMarkdownTasks(text: string) {
   return items;
 }
 
+function formatSyncCounts(counts: Record<string, number> | null | undefined) {
+  if (!counts) return "none";
+  const entries = Object.entries(counts).filter(([, v]) => Number.isFinite(v) && v > 0);
+  if (!entries.length) return "none";
+  return entries.map(([k, v]) => `${k} ${v}`).join(", ");
+}
+
 export default function Settings() {
   const { toast } = useToast();
-  const { home, planner, saveHome, savePlanner, exportBundle, importBundle, resetLocal, loadExampleTownHollywood } = useData();
+  const {
+    home,
+    planner,
+    orderedRooms,
+    unitPreference,
+    lastSyncAt,
+    lastSyncSummary,
+    dirtyCounts,
+    saveHome,
+    savePlanner,
+    setUnitPreference,
+    exportBundle,
+    importBundle,
+    resetLocal,
+    loadExampleTownHollywood,
+  } = useData();
 
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [importText, setImportText] = useState("");
@@ -133,7 +161,7 @@ export default function Settings() {
     setSyncing(true);
     try {
       const res = await syncNow();
-      toast({ title: "Synced", description: `Pushed changes and pulled remote data.` });
+      toast({ title: "Synced", description: `Push: ${formatSyncCounts(res.push)} · Pull: ${formatSyncCounts(res.pull)}` });
       void runHealth();
       return res;
     } catch (err: any) {
@@ -182,7 +210,8 @@ export default function Settings() {
         await importBundle(parsed, { mode, aiAssisted: importAiAssisted });
         toast({ title: "Imported", description: mode === "replace" ? "Local data replaced." : "Data merged." });
       } catch (jsonErr) {
-        const tasks = parseMarkdownTasks(importText);
+        const fallbackRoom = orderedRooms[0]?.id || "Living";
+        const tasks = parseMarkdownTasks(importText, orderedRooms, fallbackRoom);
         if (!tasks.length) throw jsonErr;
         await importBundle({ title: "Markdown tasks import", items: tasks }, { mode, aiAssisted: importAiAssisted });
         toast({ title: "Imported", description: `Imported ${tasks.length} Markdown task(s).` });
@@ -279,6 +308,25 @@ export default function Settings() {
             >
               Save home info
             </Button>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-4">
+        <div className="text-sm font-semibold">Units</div>
+        <div className="mt-3 grid gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="unit_pref">Preferred measurement entry unit</Label>
+            <select
+              id="unit_pref"
+              value={unitPreference}
+              onChange={(e) => void setUnitPreference(e.target.value === "cm" ? "cm" : "in")}
+              className="h-11 w-full rounded-md border bg-background px-3 text-base"
+            >
+              <option value="in">inches (in)</option>
+              <option value="cm">centimeters (cm)</option>
+            </select>
+            <div className="text-xs text-muted-foreground">Used for measurement entry forms across the app.</div>
           </div>
         </div>
       </Card>
@@ -464,6 +512,19 @@ export default function Settings() {
               </span>
             </div>
             {health.message ? <div className="mt-1 text-xs text-muted-foreground">{health.message}</div> : null}
+          </div>
+        ) : null}
+        <div className="mt-3 text-xs text-muted-foreground">
+          Pending changes: items {dirtyCounts.items}, options {dirtyCounts.options}, measurements {dirtyCounts.measurements}, rooms{" "}
+          {dirtyCounts.rooms}.
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Last sync:{" "}
+          <span className="font-semibold">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : "Never"}</span>
+        </div>
+        {lastSyncSummary ? (
+          <div className="mt-1 text-xs text-muted-foreground">
+            Last sync summary: Push {formatSyncCounts(lastSyncSummary.push)} \u00b7 Pull {formatSyncCounts(lastSyncSummary.pull)}
           </div>
         ) : null}
         <div className="mt-3 text-xs text-muted-foreground">

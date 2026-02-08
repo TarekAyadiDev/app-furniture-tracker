@@ -11,14 +11,14 @@ export function getTownHollywoodExampleBundle(): ExportBundleV1 {
   const ts = t();
 
   const rooms: Room[] = [
-    { id: "Living", sort: 0, notes: "Great room = living + dining zones.", createdAt: ts, updatedAt: ts },
-    { id: "Dining", sort: 1, notes: "", createdAt: ts, updatedAt: ts },
-    { id: "Master", sort: 2, notes: "", createdAt: ts, updatedAt: ts },
-    { id: "Bedroom2", sort: 3, notes: "Guest/office combo: keep closet clearance.", createdAt: ts, updatedAt: ts },
-    { id: "Balcony", sort: 4, notes: "243 sq ft exterior. Measure usable rectangle between railings/walls.", createdAt: ts, updatedAt: ts },
-    { id: "Entry", sort: 5, notes: "", createdAt: ts, updatedAt: ts },
-    { id: "Kitchen", sort: 6, notes: "", createdAt: ts, updatedAt: ts },
-    { id: "Bath", sort: 7, notes: "", createdAt: ts, updatedAt: ts },
+    { id: "Living", name: "Living", sort: 0, notes: "Great room = living + dining zones.", createdAt: ts, updatedAt: ts },
+    { id: "Dining", name: "Dining", sort: 1, notes: "", createdAt: ts, updatedAt: ts },
+    { id: "Master", name: "Master", sort: 2, notes: "", createdAt: ts, updatedAt: ts },
+    { id: "Bedroom2", name: "Bedroom2", sort: 3, notes: "Guest/office combo: keep closet clearance.", createdAt: ts, updatedAt: ts },
+    { id: "Balcony", name: "Balcony", sort: 4, notes: "243 sq ft exterior. Measure usable rectangle between railings/walls.", createdAt: ts, updatedAt: ts },
+    { id: "Entry", name: "Entry", sort: 5, notes: "", createdAt: ts, updatedAt: ts },
+    { id: "Kitchen", name: "Kitchen", sort: 6, notes: "", createdAt: ts, updatedAt: ts },
+    { id: "Bath", name: "Bath", sort: 7, notes: "", createdAt: ts, updatedAt: ts },
   ];
 
   const measurements: Measurement[] = [

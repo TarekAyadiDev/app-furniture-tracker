@@ -35,8 +35,7 @@ function parseDims(text: any) {
 
 function normalizeRoom(room: any) {
   const r = String(room || "").trim();
-  const allowed = ["Living", "Dining", "Master", "Bedroom2", "Balcony", "Entry", "Kitchen", "Bath"];
-  return allowed.includes(r) ? r : "Living";
+  return r || "Living";
 }
 
 function normalizeStatus(status: any) {
@@ -147,6 +146,7 @@ export default async function handler(req: any, res: any) {
         const room = normalizeRoom(f["Room"]);
         roomsMap.set(room, {
           id: room,
+          name: room,
           remoteId: rec.id,
           syncState: "clean",
           notes: userNotes || "",
@@ -157,16 +157,23 @@ export default async function handler(req: any, res: any) {
       }
     }
 
-    const rooms = [
-      "Living",
-      "Dining",
-      "Master",
-      "Bedroom2",
-      "Balcony",
-      "Entry",
-      "Kitchen",
-      "Bath",
-    ].map((rid) => roomsMap.get(rid) || { id: rid, remoteId: null, syncState: "clean", notes: "", createdAt: Date.now(), updatedAt: Date.now() });
+    const roomIds = new Set<string>();
+    for (const it of items) roomIds.add(it.room);
+    for (const m of measurements) roomIds.add(m.room);
+    for (const rid of roomsMap.keys()) roomIds.add(rid);
+
+    const rooms = [...roomIds].map(
+      (rid) =>
+        roomsMap.get(rid) || {
+          id: rid,
+          name: rid,
+          remoteId: null,
+          syncState: "clean",
+          notes: "",
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+    );
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");

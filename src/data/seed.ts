@@ -1,5 +1,5 @@
 import type { Room } from "@/lib/domain";
-import { ROOMS } from "@/lib/domain";
+import { DEFAULT_ROOMS } from "@/lib/domain";
 import { nowMs } from "@/lib/format";
 
 export const DEFAULT_HOME = {
@@ -11,8 +11,9 @@ export const DEFAULT_HOME = {
 
 export function makeDefaultRooms(): Room[] {
   const t = nowMs();
-  return ROOMS.map((id, idx) => ({
-    id,
+  return DEFAULT_ROOMS.map((name, idx) => ({
+    id: name,
+    name,
     notes: "",
     sort: idx,
     createdAt: t,

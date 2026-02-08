@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { Card } from "@/components/ui/card";
-import { ROOMS } from "@/lib/domain";
 import type { Item, ItemStatus, RoomId } from "@/lib/domain";
 import { formatMoneyUSD } from "@/lib/format";
 import { useData } from "@/data/DataContext";
@@ -27,18 +26,9 @@ function addLine(t: Totals, item: Item) {
 }
 
 export default function Budget() {
-  const { items, rooms } = useData();
+  const { items, orderedRooms, roomNameById } = useData();
 
-  const orderedRoomIds = useMemo(() => {
-    const byId = new Map(rooms.filter((r) => r.syncState !== "deleted").map((r) => [r.id, r] as const));
-    const base = ROOMS.map((rid, idx) => {
-      const r = byId.get(rid);
-      const sort = typeof r?.sort === "number" ? r.sort : idx;
-      return { id: rid, sort, idx };
-    });
-    base.sort((a, b) => (a.sort !== b.sort ? a.sort - b.sort : a.idx - b.idx));
-    return base.map((x) => x.id);
-  }, [rooms]);
+  const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
 
   const activeItems = useMemo(() => items.filter((i) => i.syncState !== "deleted"), [items]);
 
@@ -50,13 +40,13 @@ export default function Budget() {
 
   const byRoom = useMemo(() => {
     const out = new Map<RoomId, Totals>();
-    for (const r of ROOMS) out.set(r, { planned: 0, selected: 0, spent: 0, missingPrice: 0, count: 0 });
+    for (const r of orderedRoomIds) out.set(r, { planned: 0, selected: 0, spent: 0, missingPrice: 0, count: 0 });
     for (const it of activeItems) {
       const t = out.get(it.room);
       if (t) addLine(t, it);
     }
     return out;
-  }, [activeItems]);
+  }, [activeItems, orderedRoomIds]);
 
   const byCategory = useMemo(() => {
     const out = new Map<string, Totals>();
@@ -100,7 +90,7 @@ export default function Budget() {
             return (
               <div key={r} className="rounded-lg border bg-background p-3">
                 <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-base font-semibold">{r}</div>
+                  <div className="text-base font-semibold">{roomNameById.get(r) || r}</div>
                   <div className="text-sm font-semibold">{formatMoneyUSD(total)}</div>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">

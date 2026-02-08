@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Actor, ExportBundleV1, ExportBundleV2, Item, Measurement, Option, PlannerAttachmentV1, Provenance, Room, RoomId } from "@/lib/domain";
-import { ITEM_STATUSES, ROOMS } from "@/lib/domain";
+import { DEFAULT_ROOMS, ITEM_STATUSES } from "@/lib/domain";
 import { nowMs, parseNumberOrNull } from "@/lib/format";
 import { diffItem, diffMeasurement, diffOption } from "@/lib/diff";
 import { newId } from "@/lib/id";
@@ -16,28 +16,46 @@ import {
 } from "@/storage/idb";
 import { notifyDbChanged, subscribeDbChanges } from "@/storage/notify";
 import { getTownHollywoodExampleBundle } from "@/examples/town-hollywood";
+import { buildRoomNameMap, ensureRoomNames, normalizeRoomName, orderRooms } from "@/lib/rooms";
 
 type HomeMeta = NonNullable<ExportBundleV1["home"]>;
 
 type PlannerMeta = PlannerAttachmentV1 | null;
+
+type UnitPreference = "in" | "cm";
+
+type SyncSummary = {
+  push: Record<string, number>;
+  pull: Record<string, number>;
+};
 
 type DataContextValue = {
   ready: boolean;
   home: HomeMeta;
   planner: PlannerMeta;
   rooms: Room[];
+  orderedRooms: Room[];
+  roomNameById: Map<RoomId, string>;
   measurements: Measurement[];
   items: Item[];
   options: Option[];
+  unitPreference: UnitPreference;
+  lastSyncAt: number | null;
+  lastSyncSummary: SyncSummary | null;
+  dirtyCounts: { items: number; options: number; measurements: number; rooms: number };
 
   saveHome: (home: HomeMeta) => Promise<void>;
   savePlanner: (planner: PlannerMeta) => Promise<void>;
+  setUnitPreference: (unit: UnitPreference) => Promise<void>;
 
   reorderRooms: (orderedRoomIds: RoomId[]) => Promise<void>;
   reorderItems: (roomId: RoomId, orderedItemIds: string[]) => Promise<void>;
   reorderMeasurements: (roomId: RoomId, orderedMeasurementIds: string[]) => Promise<void>;
   reorderOptions: (itemId: string, orderedOptionIds: string[]) => Promise<void>;
   renameCategory: (oldName: string, newName: string) => Promise<void>;
+
+  createRoom: (name: string) => Promise<RoomId | null>;
+  deleteRoom: (id: RoomId, opts?: { moveTo?: RoomId }) => Promise<void>;
 
   createItem: (partial: Partial<Item>) => Promise<string>;
   updateItem: (id: string, patch: Partial<Item>) => Promise<void>;
@@ -84,9 +102,30 @@ function sanitizePlannerMeta(input: unknown): PlannerMeta {
   return { version: 1, mergedAt, template };
 }
 
+function sanitizeUnitPreference(input: unknown): UnitPreference {
+  return input === "cm" ? "cm" : "in";
+}
+
+function sanitizeSyncSummary(input: unknown): SyncSummary | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const obj = input as Record<string, unknown>;
+  const push = obj.push && typeof obj.push === "object" && !Array.isArray(obj.push) ? (obj.push as Record<string, unknown>) : null;
+  const pull = obj.pull && typeof obj.pull === "object" && !Array.isArray(obj.pull) ? (obj.pull as Record<string, unknown>) : null;
+  if (!push || !pull) return null;
+  function normalizeCounts(value: Record<string, unknown>) {
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(value)) {
+      const n = typeof v === "number" ? v : Number(v);
+      if (Number.isFinite(n)) out[k] = Math.max(0, Math.round(n));
+    }
+    return out;
+  }
+  return { push: normalizeCounts(push), pull: normalizeCounts(pull) };
+}
+
 function normalizeRoomId(raw: unknown): RoomId | null {
-  const t = String(raw || "").trim();
-  return (ROOMS as readonly string[]).includes(t) ? (t as RoomId) : null;
+  const t = String(raw ?? "").trim();
+  return t ? t : null;
 }
 
 function normalizeStatus(raw: unknown): Item["status"] {
@@ -181,12 +220,16 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
     const planner = sanitizePlannerMeta(obj.planner);
     const exportedAt = typeof obj.exportedAt === "string" ? obj.exportedAt : new Date().toISOString();
     const exportMeta = sanitizeExportMeta(obj.exportMeta);
-    const importedRooms: Room[] = (obj.rooms as unknown[]).map((r) => {
-      const rid = normalizeRoomId((r as any)?.id) ?? "Living";
+    const importedRoomsRaw: Room[] = (obj.rooms as unknown[]).map((r) => {
+      const rawId = normalizeRoomId((r as any)?.id);
+      const rawName = normalizeRoomName((r as any)?.name ?? rawId ?? "");
+      const id = rawId || (rawName ? rawName : newId("r"));
+      const name = rawName || id;
       const createdAt = coerceNumberOrNull((r as any)?.createdAt) ?? nowMs();
       const updatedAt = coerceNumberOrNull((r as any)?.updatedAt) ?? createdAt;
       return {
-        id: rid,
+        id,
+        name,
         notes: typeof (r as any)?.notes === "string" ? (r as any).notes : "",
         sort: coerceSort((r as any)?.sort),
         createdAt,
@@ -197,23 +240,26 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
       };
     });
 
-    // Ensure all known rooms exist (older exports might omit rooms with no data).
-    const roomById = new Map<RoomId, Room>();
-    for (const r of importedRooms) roomById.set(r.id, r);
-    const rooms: Room[] = ROOMS.map((rid, idx) => {
-      const r = roomById.get(rid);
-      if (!r) {
-        const t = nowMs();
-        return { id: rid, notes: "", sort: idx, createdAt: t, updatedAt: t };
-      }
+    const rooms: Room[] = ensureRoomNames(importedRoomsRaw.length ? importedRoomsRaw : makeDefaultRooms()).map((r, idx) => {
       if (typeof r.sort !== "number") r.sort = idx;
       return r;
     });
+    const roomById = new Map<RoomId, Room>(rooms.map((r) => [r.id, r] as const));
+
+    function ensureRoom(id: RoomId) {
+      if (roomById.has(id)) return;
+      const ts = nowMs();
+      const name = normalizeRoomName(id) || `Room ${roomById.size + 1}`;
+      const next: Room = { id, name, notes: "", sort: roomById.size, createdAt: ts, updatedAt: ts };
+      roomById.set(id, next);
+      rooms.push(next);
+    }
 
     const measurements: Measurement[] = Array.isArray(obj.measurements)
       ? (obj.measurements as unknown[]).map((m) => {
           const mid = typeof (m as any)?.id === "string" ? (m as any).id : newId("m");
-          const room = normalizeRoomId((m as any)?.room) ?? "Living";
+          const room = normalizeRoomId((m as any)?.room) ?? rooms[0]?.id ?? DEFAULT_ROOMS[0];
+          ensureRoom(room);
           const valueIn = coerceNumberOrNull((m as any)?.valueIn) ?? 0;
           const createdAt = coerceNumberOrNull((m as any)?.createdAt) ?? nowMs();
           const updatedAt = coerceNumberOrNull((m as any)?.updatedAt) ?? createdAt;
@@ -241,7 +287,8 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
 
     const items: Item[] = (obj.items as unknown[]).map((it) => {
       const iid = typeof (it as any)?.id === "string" ? (it as any).id : newId("i");
-      const room = normalizeRoomId((it as any)?.room) ?? "Living";
+      const room = normalizeRoomId((it as any)?.room) ?? rooms[0]?.id ?? DEFAULT_ROOMS[0];
+      ensureRoom(room);
       const createdAt = coerceNumberOrNull((it as any)?.createdAt) ?? nowMs();
       const updatedAt = coerceNumberOrNull((it as any)?.updatedAt) ?? createdAt;
       const qtyRaw = coerceNumberOrNull((it as any)?.qty);
@@ -322,17 +369,28 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
 
     // Ensure all rooms exist
     const rooms = makeDefaultRooms().map((r) => ({ ...r, syncState: undefined }));
+    const roomById = new Map(rooms.map((r) => [r.id, r] as const));
 
-    const nextSortByRoom: Record<RoomId, number> = ROOMS.reduce(
-      (acc, rid) => {
-        acc[rid] = 0;
-        return acc;
-      },
-      {} as Record<RoomId, number>,
-    );
+    function ensureLegacyRoom(id: RoomId) {
+      if (roomById.has(id)) return;
+      const name = normalizeRoomName(id) || `Room ${roomById.size + 1}`;
+      const room: Room = { id, name, notes: "", sort: roomById.size, createdAt: ts, updatedAt: ts };
+      roomById.set(id, room);
+      rooms.push(room);
+    }
+
+    const nextSortByRoom: Record<RoomId, number> = {};
+
+    function nextRoomSort(roomId: RoomId) {
+      if (typeof nextSortByRoom[roomId] !== "number") nextSortByRoom[roomId] = 0;
+      const next = nextSortByRoom[roomId];
+      nextSortByRoom[roomId] = next + 1;
+      return next;
+    }
 
     const items: Item[] = (obj.items as unknown[] | undefined || []).map((it) => {
-      const room = normalizeRoomId((it as any)?.room) ?? "Living";
+      const room = normalizeRoomId((it as any)?.room) ?? rooms[0]?.id ?? DEFAULT_ROOMS[0];
+      ensureLegacyRoom(room);
       const specs = coerceSpecs((it as any)?.specs);
       return {
         id: newId("i"),
@@ -340,7 +398,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         room,
         category: String((it as any)?.category || "Other").trim() || "Other",
         status: normalizeStatus((it as any)?.status),
-        sort: nextSortByRoom[room]++,
+        sort: nextRoomSort(room),
         price: typeof (it as any)?.price === "number" ? (it as any).price : null,
         qty: typeof (it as any)?.quantity === "number" ? Math.round((it as any).quantity) : 1,
         store: typeof (it as any)?.store === "string" ? (it as any).store : null,
@@ -386,16 +444,18 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
       })
       .filter(Boolean) as Option[];
 
-    const nextMeasSortByRoom: Record<RoomId, number> = ROOMS.reduce(
-      (acc, rid) => {
-        acc[rid] = 0;
-        return acc;
-      },
-      {} as Record<RoomId, number>,
-    );
+    const nextMeasSortByRoom: Record<RoomId, number> = {};
+
+    function nextMeasSort(roomId: RoomId) {
+      if (typeof nextMeasSortByRoom[roomId] !== "number") nextMeasSortByRoom[roomId] = 0;
+      const next = nextMeasSortByRoom[roomId];
+      nextMeasSortByRoom[roomId] = next + 1;
+      return next;
+    }
 
     const measurements: Measurement[] = (obj.measurements as unknown[] | undefined || []).map((m) => {
-      const room = normalizeRoomId((m as any)?.room) ?? "Living";
+      const room = normalizeRoomId((m as any)?.room) ?? rooms[0]?.id ?? DEFAULT_ROOMS[0];
+      ensureLegacyRoom(room);
       const unit = String((m as any)?.unit || "in").trim().toLowerCase();
       const rawValue = typeof (m as any)?.value === "number" ? (m as any).value : 0;
       const valueIn = unit === "cm" ? rawValue / 2.54 : rawValue;
@@ -407,7 +467,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         room,
         label: String((m as any)?.label || "").trim() || "Measurement",
         valueIn,
-        sort: nextMeasSortByRoom[room]++,
+        sort: nextMeasSort(room),
         confidence,
         forCategory: null,
         forItemId: null,
@@ -422,6 +482,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
     for (const n of notesArr) {
       const rid = normalizeRoomId(n?.room);
       if (!rid) continue;
+      ensureLegacyRoom(rid);
       const r = rooms.find((x) => x.id === rid);
       if (!r) continue;
       if (typeof n?.notes === "string") r.notes = n.notes;
@@ -484,6 +545,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [options, setOptions] = useState<Option[]>([]);
+  const [unitPreference, setUnitPreferenceState] = useState<UnitPreference>("in");
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
+  const [lastSyncSummary, setLastSyncSummary] = useState<SyncSummary | null>(null);
 
   const saveHome = useCallback(async (next: HomeMeta) => {
     const sanitized = sanitizeHomeMeta(next);
@@ -499,12 +563,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     notifyDbChanged();
   }, []);
 
+  const saveUnitPreference = useCallback(async (unit: UnitPreference) => {
+    const sanitized = sanitizeUnitPreference(unit);
+    await idbSetMeta("unitPreference", sanitized);
+    setUnitPreferenceState(sanitized);
+    notifyDbChanged();
+  }, []);
+
   const reloadAll = useCallback(async () => {
     const snap = await idbGetSnapshot();
-    let nextRooms = snap.rooms;
+    let nextRooms = ensureRoomNames(snap.rooms);
 
     if (!nextRooms.length) {
       nextRooms = makeDefaultRooms();
+      await idbBulkPut("rooms", nextRooms);
+    } else if (snap.rooms.some((r) => !normalizeRoomName((r as any)?.name))) {
       await idbBulkPut("rooms", nextRooms);
     }
 
@@ -512,6 +585,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!snap.meta.home) await idbSetMeta("home", homeMeta);
     const plannerMeta = sanitizePlannerMeta(snap.meta.planner);
     if (snap.meta.planner && !plannerMeta) await idbSetMeta("planner", plannerMeta);
+    const unitPref = sanitizeUnitPreference(snap.meta.unitPreference);
+    if (!snap.meta.unitPreference) await idbSetMeta("unitPreference", unitPref);
+    const syncAt = typeof snap.meta.lastSyncAt === "number" ? snap.meta.lastSyncAt : null;
+    const syncSummary = sanitizeSyncSummary(snap.meta.lastSyncSummary);
 
     setHome(homeMeta);
     setPlanner(plannerMeta);
@@ -519,6 +596,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setMeasurements(snap.measurements);
     setItems(snap.items);
     setOptions(snap.options);
+    setUnitPreferenceState(unitPref);
+    setLastSyncAt(syncAt);
+    setLastSyncSummary(syncSummary);
 
     setReady(true);
   }, []);
@@ -531,10 +611,77 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     });
   }, [reloadAll]);
 
+  const orderedRooms = useMemo(() => orderRooms(rooms), [rooms]);
+  const roomNameById = useMemo(() => buildRoomNameMap(rooms), [rooms]);
+  const defaultRoomId = orderedRooms[0]?.id ?? DEFAULT_ROOMS[0];
+
+  const resolveRoomId = useCallback(
+    (raw: unknown) => {
+      const rid = normalizeRoomId(raw);
+      if (rid && rooms.some((r) => r.syncState !== "deleted" && r.id === rid)) return rid;
+      return defaultRoomId;
+    },
+    [defaultRoomId, rooms],
+  );
+
+  const createRoom = useCallback(
+    async (nameRaw: string) => {
+      const name = normalizeRoomName(nameRaw);
+      if (!name) return null;
+      const allRooms = await idbGetAll<Room>("rooms");
+      const existing = allRooms.find((r) => r.syncState !== "deleted" && normalizeRoomName(r.name).toLowerCase() === name.toLowerCase());
+      if (existing) return existing.id;
+      const ts = nowMs();
+      const sort = allRooms.filter((r) => r.syncState !== "deleted").length;
+      const room: Room = {
+        id: name,
+        name,
+        notes: "",
+        sort,
+        createdAt: ts,
+        updatedAt: ts,
+        syncState: "dirty",
+        remoteId: null,
+        provenance: makeHumanCreatedProvenance(undefined, ts),
+      };
+      await idbPut("rooms", room);
+      notifyDbChanged();
+      return room.id;
+    },
+    [],
+  );
+
+  const deleteRoom = useCallback(async (id: RoomId, opts?: { moveTo?: RoomId }) => {
+    const allRooms = await idbGetAll<Room>("rooms");
+    const cur = allRooms.find((r) => r.id === id);
+    if (!cur) return;
+    const moveTo = opts?.moveTo;
+    const ts = nowMs();
+
+    const allItems = await idbGetAll<Item>("items");
+    const allMeas = await idbGetAll<Measurement>("measurements");
+    const itemsToMove = allItems.filter((i) => i.syncState !== "deleted" && i.room === id);
+    const measToMove = allMeas.filter((m) => m.syncState !== "deleted" && m.room === id);
+
+    if ((itemsToMove.length || measToMove.length) && !moveTo) {
+      throw new Error("Room has items or measurements. Choose a destination room.");
+    }
+
+    if (moveTo) {
+      const nextItems = itemsToMove.map((i) => ({ ...i, room: moveTo, updatedAt: ts, syncState: "dirty" }));
+      const nextMeas = measToMove.map((m) => ({ ...m, room: moveTo, updatedAt: ts, syncState: "dirty" }));
+      if (nextItems.length) await idbBulkPut("items", nextItems);
+      if (nextMeas.length) await idbBulkPut("measurements", nextMeas);
+    }
+
+    await idbPut("rooms", { ...cur, syncState: "deleted", updatedAt: ts });
+    notifyDbChanged();
+  }, []);
+
   const createItem = useCallback(
     async (partial: Partial<Item>) => {
       const ts = nowMs();
-      const room = normalizeRoomId(partial.room) ?? "Living";
+      const room = resolveRoomId(partial.room);
       const allExisting = await idbGetAll<Item>("items");
       const minSort = allExisting
         .filter((i) => i.syncState !== "deleted" && i.room === room && typeof i.sort === "number")
@@ -566,7 +713,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       notifyDbChanged();
       return id;
     },
-    [],
+    [resolveRoomId],
   );
 
   const updateItem = useCallback(async (id: string, patch: Partial<Item>) => {
@@ -577,7 +724,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const next: Item = {
       ...cur,
       ...patch,
-      room: normalizeRoomId(patch.room ?? cur.room) ?? cur.room,
+      room: resolveRoomId(patch.room ?? cur.room),
       status: normalizeStatus(patch.status ?? cur.status),
       category: typeof patch.category === "string" ? patch.category : cur.category,
       name: typeof patch.name === "string" ? patch.name : cur.name,
@@ -587,7 +734,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
     await idbPut("items", next);
     notifyDbChanged();
-  }, []);
+  }, [resolveRoomId]);
 
   const deleteItem = useCallback(async (id: string) => {
     const all = await idbGetAll<Item>("items");
@@ -657,9 +804,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const createMeasurement = useCallback(async (partial: Partial<Measurement> & { room: RoomId }) => {
     const ts = nowMs();
+    const room = resolveRoomId(partial.room);
     const allExisting = await idbGetAll<Measurement>("measurements");
     const minSort = allExisting
-      .filter((m) => m.syncState !== "deleted" && m.room === partial.room && typeof m.sort === "number")
+      .filter((m) => m.syncState !== "deleted" && m.room === room && typeof m.sort === "number")
       .reduce((min, m) => Math.min(min, m.sort as number), 0);
     const sort = minSort - 1;
     const id = newId("m");
@@ -667,7 +815,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       id,
       remoteId: null,
       syncState: "dirty",
-      room: partial.room,
+      room,
       label: (partial.label || "").toString().trim() || "Measurement",
       valueIn: typeof partial.valueIn === "number" ? partial.valueIn : 0,
       sort,
@@ -685,7 +833,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     await idbPut("measurements", m);
     notifyDbChanged();
     return id;
-  }, []);
+  }, [resolveRoomId]);
 
   const updateMeasurement = useCallback(async (id: string, patch: Partial<Measurement>) => {
     const all = await idbGetAll<Measurement>("measurements");
@@ -695,7 +843,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const next: Measurement = {
       ...cur,
       ...patch,
-      room: normalizeRoomId(patch.room ?? cur.room) ?? cur.room,
+      room: resolveRoomId(patch.room ?? cur.room),
       forCategory:
         patch.forCategory === null ? null : typeof patch.forCategory === "string" ? patch.forCategory : cur.forCategory ?? null,
       forItemId:
@@ -706,7 +854,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     };
     await idbPut("measurements", next);
     notifyDbChanged();
-  }, []);
+  }, [resolveRoomId]);
 
   const deleteMeasurement = useCallback(async (id: string) => {
     const all = await idbGetAll<Measurement>("measurements");
@@ -720,11 +868,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const all = await idbGetAll<Room>("rooms");
     const cur = all.find((x) => x.id === id);
     const ts = nowMs();
-    const base: Room = cur || { id, notes: "", createdAt: ts, updatedAt: ts, syncState: "dirty", remoteId: null };
+    const base: Room =
+      cur || { id, name: normalizeRoomName(id) || "Room", notes: "", createdAt: ts, updatedAt: ts, syncState: "dirty", remoteId: null };
+    const nextName = normalizeRoomName(patch.name ?? base.name) || base.name;
     const next: Room = {
       ...base,
       ...patch,
       id,
+      name: nextName,
       notes: typeof patch.notes === "string" ? patch.notes : base.notes,
       updatedAt: ts,
       syncState: patch.syncState ?? "dirty",
@@ -740,7 +891,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     // Keep any missing rooms at the end in a stable order.
     const ordered = orderedRoomIds.filter((rid) => roomById.has(rid));
-    const remaining = ROOMS.filter((rid) => !ordered.includes(rid)).filter((rid) => roomById.has(rid));
+    const currentIds = orderRooms([...roomById.values()]).map((r) => r.id);
+    const remaining = currentIds.filter((rid) => !ordered.includes(rid));
     const finalIds = [...ordered, ...remaining];
 
     const ts = nowMs();
@@ -1110,22 +1262,41 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     [importBundle],
   );
 
+  const dirtyCounts = useMemo(
+    () => ({
+      items: items.filter((i) => i.syncState !== "clean").length,
+      options: options.filter((o) => o.syncState !== "clean").length,
+      measurements: measurements.filter((m) => m.syncState !== "clean").length,
+      rooms: rooms.filter((r) => r.syncState !== "clean").length,
+    }),
+    [items, measurements, options, rooms],
+  );
+
   const value = useMemo<DataContextValue>(
     () => ({
       ready,
       home,
       planner,
       rooms,
+      orderedRooms,
+      roomNameById,
       measurements,
       items,
       options,
+      unitPreference,
+      lastSyncAt,
+      lastSyncSummary,
+      dirtyCounts,
       saveHome,
       savePlanner,
+      setUnitPreference: saveUnitPreference,
       reorderRooms,
       reorderItems,
       reorderMeasurements,
       reorderOptions,
       renameCategory,
+      createRoom,
+      deleteRoom,
       createItem,
       updateItem,
       deleteItem,
@@ -1146,16 +1317,25 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       home,
       planner,
       rooms,
+      orderedRooms,
+      roomNameById,
       measurements,
       items,
       options,
+      unitPreference,
+      lastSyncAt,
+      lastSyncSummary,
+      dirtyCounts,
       saveHome,
       savePlanner,
+      saveUnitPreference,
       reorderRooms,
       reorderItems,
       reorderMeasurements,
       reorderOptions,
       renameCategory,
+      createRoom,
+      deleteRoom,
       createItem,
       updateItem,
       deleteItem,
