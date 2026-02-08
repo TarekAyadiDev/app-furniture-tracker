@@ -277,7 +277,10 @@ export default async function handler(req: any, res: any) {
       }
 
       const parentLocal = String(o.itemId || "").trim();
-      const parentRemote = itemIdMap[parentLocal] || (isRemoteId(parentLocal) ? parentLocal : null);
+      const parentRemote =
+        (typeof o.parentRemoteId === "string" && isRemoteId(o.parentRemoteId) ? o.parentRemoteId : null) ||
+        itemIdMap[parentLocal] ||
+        (isRemoteId(parentLocal) ? parentLocal : null);
       if (!parentRemote) continue; // parent not known yet
 
       const finalTotal = optionBaseTotal(o) - optionDiscountAmount(o);

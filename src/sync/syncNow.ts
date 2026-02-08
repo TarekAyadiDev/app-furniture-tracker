@@ -205,6 +205,7 @@ async function pushChanges(mode: PushMode = "commit") {
       .filter((x) => x.syncState !== "clean")
       .map((o) => ({
         ...o,
+        parentRemoteId: snap.items.find((it) => it.id === o.itemId)?.remoteId || null,
         attachments: attachmentByParentKey.get(`option:${o.id}`) || [],
       })),
     measurements: snap.measurements.filter((x) => x.syncState !== "clean"),
