@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
 import { ITEM_STATUSES, type ItemStatus, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
+import { useToast } from "@/hooks/use-toast";
+import { addAttachmentFromUrl, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 
 type RoomFilter = RoomId | "All";
 type StatusFilter = ItemStatus | "All";
@@ -271,42 +273,45 @@ export default function Items() {
                         return (
                           <Card key={it.id} className="p-3">
                             <div className="flex items-start gap-3">
-                              <button
-                                type="button"
-                                className="min-w-0 flex-1 text-left"
-                                onClick={() => nav(`/items/${it.id}`)}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="truncate text-base font-semibold">{it.name}</div>
-                                  <StatusBadge status={it.status} />
-                                </div>
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  <ReviewStatusBadge status={it.provenance?.reviewStatus} />
-                                  <DataSourceBadge dataSource={it.provenance?.dataSource} />
-                                  {modifiedFields.length ? (
-                                    <span className="text-xs text-muted-foreground">
-                                      Changed: {modifiedFields.slice(0, 4).join(", ")}
-                                      {modifiedFields.length > 4 ? ` +${modifiedFields.length - 4}` : ""}
-                                    </span>
-                                  ) : null}
-                                </div>
-                                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                                  <span className="truncate">{it.category || "Other"}</span>
-                                  {it.store ? <span className="truncate">{it.store}</span> : null}
-                                  {it.price ? (
-                                    <span>{formatMoneyUSD(it.price)}</span>
-                                  ) : (
-                                    <span className="italic">no price</span>
-                                  )}
-                                  {it.qty !== 1 ? <span>qty {it.qty}</span> : null}
-                                  {it.priority ? <span>P{it.priority}</span> : null}
-                                  {opt?.selectedTitle ? (
-                                    <span className="font-medium text-foreground">Selected: {opt.selectedTitle}</span>
-                                  ) : opt?.count ? (
-                                    <span>{opt.count} option(s)</span>
-                                  ) : null}
-                                </div>
-                              </button>
+                              <ItemPhotoStrip itemId={it.id} />
+                              <div className="min-w-0 flex-1">
+                                <button
+                                  type="button"
+                                  className="w-full min-w-0 text-left"
+                                  onClick={() => nav(`/items/${it.id}`)}
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="truncate text-base font-semibold">{it.name}</div>
+                                    <StatusBadge status={it.status} />
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    <ReviewStatusBadge status={it.provenance?.reviewStatus} />
+                                    <DataSourceBadge dataSource={it.provenance?.dataSource} />
+                                    {modifiedFields.length ? (
+                                      <span className="text-xs text-muted-foreground">
+                                        Changed: {modifiedFields.slice(0, 4).join(", ")}
+                                        {modifiedFields.length > 4 ? ` +${modifiedFields.length - 4}` : ""}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                    <span className="truncate">{it.category || "Other"}</span>
+                                    {it.store ? <span className="truncate">{it.store}</span> : null}
+                                    {it.price ? (
+                                      <span>{formatMoneyUSD(it.price)}</span>
+                                    ) : (
+                                      <span className="italic">no price</span>
+                                    )}
+                                    {it.qty !== 1 ? <span>qty {it.qty}</span> : null}
+                                    {it.priority ? <span>P{it.priority}</span> : null}
+                                    {opt?.selectedTitle ? (
+                                      <span className="font-medium text-foreground">Selected: {opt.selectedTitle}</span>
+                                    ) : opt?.count ? (
+                                      <span>{opt.count} option(s)</span>
+                                    ) : null}
+                                  </div>
+                                </button>
+                              </div>
 
                               <Link
                                 to={`/items/${it.id}`}
@@ -364,6 +369,92 @@ export default function Items() {
           </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+function ItemPhotoStrip({ itemId }: { itemId: string }) {
+  const { toast } = useToast();
+  const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const max = 3;
+
+  useEffect(() => {
+    let active = true;
+    listAttachments("item", itemId)
+      .then((rows) => {
+        if (active) setAttachments(rows);
+      })
+      .catch(() => {
+        if (active) setAttachments([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [itemId]);
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    for (const att of attachments) next[att.id] = URL.createObjectURL(att.blob);
+    setUrls(next);
+    return () => {
+      Object.values(next).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [attachments]);
+
+  async function onRemove(attId: string) {
+    await deleteAttachment(attId);
+    setAttachments((cur) => cur.filter((att) => att.id !== attId));
+  }
+
+  async function onAddFromUrl() {
+    if (attachments.length >= max) {
+      toast({ title: "Limit reached", description: "Up to 3 photos per item." });
+      return;
+    }
+    const raw = prompt("Photo URL (image link):")?.trim();
+    if (!raw) return;
+    try {
+      await addAttachmentFromUrl("item", itemId, raw);
+      const rows = await listAttachments("item", itemId);
+      setAttachments(rows);
+    } catch (err: any) {
+      toast({ title: "Photo failed", description: err?.message || "Could not fetch that image." });
+    }
+  }
+
+  return (
+    <div className="w-[120px] shrink-0 space-y-2">
+      {attachments.length ? (
+        <div className="flex flex-wrap gap-2">
+          {attachments.slice(0, max).map((att) => (
+            <div key={att.id} className="relative h-12 w-12 overflow-hidden rounded-md border bg-background">
+              {urls[att.id] ? (
+                <img src={urls[att.id]} alt={att.name || "Item photo"} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">...</div>
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void onRemove(att.id);
+                }}
+                className="absolute right-0.5 top-0.5 rounded-full border bg-background px-1 text-[10px] text-muted-foreground hover:text-foreground"
+                aria-label="Remove photo"
+              >
+                \u00d7
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-[11px] text-muted-foreground">No photos</div>
+      )}
+      <Button type="button" size="sm" variant="secondary" className="h-7 px-2 text-[11px]" onClick={() => void onAddFromUrl()}>
+        Add link
+      </Button>
     </div>
   );
 }
