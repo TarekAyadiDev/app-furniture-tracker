@@ -58,6 +58,20 @@ function sanitizeAttachments(raw: any) {
   return out;
 }
 
+function optionBaseTotal(o: any) {
+  return (typeof o.price === "number" ? o.price : 0) + (typeof o.shipping === "number" ? o.shipping : 0) + (typeof o.taxEstimate === "number" ? o.taxEstimate : 0);
+}
+
+function optionDiscountAmount(o: any) {
+  const value = typeof o.discountValue === "number" ? o.discountValue : null;
+  const type = typeof o.discountType === "string" ? o.discountType : null;
+  if (value !== null && value > 0) {
+    if (type === "amount") return value;
+    if (type === "percent") return optionBaseTotal(o) * (value / 100);
+  }
+  return typeof o.discount === "number" ? o.discount : 0;
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     res.statusCode = 405;
@@ -111,6 +125,8 @@ export default async function handler(req: any, res: any) {
         dimensions: it.dimensions || null,
         sort: typeof it.sort === "number" ? it.sort : null,
         specs: it.specs || null,
+        discountType: it.discountType || null,
+        discountValue: typeof it.discountValue === "number" ? it.discountValue : null,
         attachments: sanitizeAttachments(it.attachments),
         createdAt: typeof it.createdAt === "number" ? it.createdAt : Date.now(),
         updatedAt: typeof it.updatedAt === "number" ? it.updatedAt : Date.now(),
@@ -264,15 +280,13 @@ export default async function handler(req: any, res: any) {
       const parentRemote = itemIdMap[parentLocal] || (isRemoteId(parentLocal) ? parentLocal : null);
       if (!parentRemote) continue; // parent not known yet
 
-      const finalTotal =
-        (typeof o.price === "number" ? o.price : 0) +
-        (typeof o.shipping === "number" ? o.shipping : 0) +
-        (typeof o.taxEstimate === "number" ? o.taxEstimate : 0) -
-        (typeof o.discount === "number" ? o.discount : 0);
+      const finalTotal = optionBaseTotal(o) - optionDiscountAmount(o);
 
       const meta = {
         selected: Boolean(o.selected),
         sort: typeof o.sort === "number" ? o.sort : null,
+        discountType: o.discountType || null,
+        discountValue: typeof o.discountValue === "number" ? o.discountValue : null,
         attachments: sanitizeAttachments(o.attachments),
         createdAt: typeof o.createdAt === "number" ? o.createdAt : Date.now(),
         updatedAt: typeof o.updatedAt === "number" ? o.updatedAt : Date.now(),
@@ -285,7 +299,7 @@ export default async function handler(req: any, res: any) {
         Store: typeof o.store === "string" ? o.store : null,
         Link: typeof o.link === "string" ? o.link : null,
         "Promo Code": typeof o.promoCode === "string" ? o.promoCode : null,
-        Discount: typeof o.discount === "number" ? o.discount : null,
+        Discount: optionDiscountAmount(o) || null,
         Shipping: typeof o.shipping === "number" ? o.shipping : null,
         "Tax Estimate": typeof o.taxEstimate === "number" ? o.taxEstimate : null,
         "Final Total": Number.isFinite(finalTotal) ? finalTotal : null,

@@ -24,16 +24,6 @@ function includesText(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
-function optionTotalOrNull(opt: Option): number | null {
-  const hasAny =
-    typeof opt.price === "number" ||
-    typeof opt.shipping === "number" ||
-    typeof opt.taxEstimate === "number" ||
-    typeof opt.discount === "number";
-  if (!hasAny) return null;
-  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
-}
-
 function optionPreDiscountTotalOrNull(opt: Option): number | null {
   const hasAny =
     typeof opt.price === "number" ||
@@ -41,6 +31,34 @@ function optionPreDiscountTotalOrNull(opt: Option): number | null {
     typeof opt.taxEstimate === "number";
   if (!hasAny) return null;
   return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0);
+}
+
+function optionDiscountAmount(opt: Option): number {
+  const value = typeof opt.discountValue === "number" ? opt.discountValue : null;
+  const type = opt.discountType === "percent" || opt.discountType === "amount" ? opt.discountType : null;
+  if (value !== null && value > 0) {
+    if (type === "amount") return value;
+    if (type === "percent") {
+      const base = optionPreDiscountTotalOrNull(opt);
+      if (base === null) return 0;
+      if (value >= 100) return base;
+      return (base * value) / 100;
+    }
+  }
+  return typeof opt.discount === "number" ? opt.discount : 0;
+}
+
+function optionTotalOrNull(opt: Option): number | null {
+  const base = optionPreDiscountTotalOrNull(opt);
+  if (base === null) return null;
+  return base - optionDiscountAmount(opt);
+}
+
+function optionDiscountLabel(opt: Option): string | null {
+  const value = typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null;
+  if (value === null || value <= 0) return null;
+  if (opt.discountType === "percent") return `disc -${value}%`;
+  return `disc -${formatMoneyUSD(value)}`;
 }
 
 function itemDiscountAmount(item: Item): number | null {
@@ -167,6 +185,8 @@ export default function Items() {
           shipping: opt.shipping ?? null,
           taxEstimate: opt.taxEstimate ?? null,
           discount: opt.discount ?? null,
+          discountType: opt.discountType ?? (typeof opt.discount === "number" ? "amount" : null),
+          discountValue: typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null,
           dimensionsText: opt.dimensionsText ?? null,
           dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
           specs: opt.specs ? { ...opt.specs } : null,
@@ -209,6 +229,8 @@ export default function Items() {
         shipping: option.shipping ?? null,
         taxEstimate: option.taxEstimate ?? null,
         discount: option.discount ?? null,
+        discountType: option.discountType ?? (typeof option.discount === "number" ? "amount" : null),
+        discountValue: typeof option.discountValue === "number" ? option.discountValue : typeof option.discount === "number" ? option.discount : null,
         dimensionsText: option.dimensionsText ?? null,
         dimensions: option.dimensions ? { ...option.dimensions } : undefined,
         specs: option.specs ? { ...option.specs } : null,
@@ -237,6 +259,14 @@ export default function Items() {
         ...others.map((o) => updateOption(o.id, { selected: false })),
       ]);
       const preDiscountTotal = optionPreDiscountTotalOrNull(option);
+      const optDiscountType =
+        option.discountType === "percent" || option.discountType === "amount"
+          ? option.discountType
+          : typeof option.discount === "number"
+            ? "amount"
+            : null;
+      const optDiscountValue =
+        typeof option.discountValue === "number" ? option.discountValue : typeof option.discount === "number" ? option.discount : null;
       await updateItem(item.id, {
         status: "Selected",
         selectedOptionId: option.id,
@@ -244,8 +274,8 @@ export default function Items() {
         store: option.store ?? null,
         link: option.link ?? null,
         price: preDiscountTotal ?? null,
-        discountType: typeof option.discount === "number" ? "amount" : null,
-        discountValue: typeof option.discount === "number" ? option.discount : null,
+        discountType: optDiscountType,
+        discountValue: optDiscountValue,
         priority: typeof option.priority === "number" ? option.priority : null,
         tags: option.tags ? [...option.tags] : null,
         dimensions: option.dimensions ? { ...option.dimensions } : undefined,
@@ -648,6 +678,7 @@ export default function Items() {
                                               {opt.store ? <span>{opt.store}</span> : null}
                                               {typeof opt.priority === "number" ? <span>P{opt.priority}</span> : null}
                                               {total ? <span>{formatMoneyUSD(total)}</span> : <span className="italic">no total</span>}
+                                              {optionDiscountLabel(opt) ? <span>{optionDiscountLabel(opt)}</span> : null}
                                             </div>
                                           </div>
                                           <div className="flex items-center gap-2">

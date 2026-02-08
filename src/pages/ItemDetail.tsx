@@ -20,16 +20,6 @@ import { useToast } from "@/hooks/use-toast";
 import { shareData } from "@/lib/share";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 
-function optionTotalOrNull(o: Option): number | null {
-  const hasAny =
-    typeof o.price === "number" ||
-    typeof o.shipping === "number" ||
-    typeof o.taxEstimate === "number" ||
-    typeof o.discount === "number";
-  if (!hasAny) return null;
-  return (o.price || 0) + (o.shipping || 0) + (o.taxEstimate || 0) - (o.discount || 0);
-}
-
 function optionPreDiscountTotalOrNull(o: Option): number | null {
   const hasAny =
     typeof o.price === "number" ||
@@ -39,8 +29,36 @@ function optionPreDiscountTotalOrNull(o: Option): number | null {
   return (o.price || 0) + (o.shipping || 0) + (o.taxEstimate || 0);
 }
 
+function optionDiscountAmount(o: Option): number {
+  const value = typeof o.discountValue === "number" ? o.discountValue : null;
+  const type = o.discountType === "percent" || o.discountType === "amount" ? o.discountType : null;
+  if (value !== null && value > 0) {
+    if (type === "amount") return value;
+    if (type === "percent") {
+      const base = optionPreDiscountTotalOrNull(o);
+      if (base === null) return 0;
+      if (value >= 100) return base;
+      return (base * value) / 100;
+    }
+  }
+  return typeof o.discount === "number" ? o.discount : 0;
+}
+
+function optionTotalOrNull(o: Option): number | null {
+  const base = optionPreDiscountTotalOrNull(o);
+  if (base === null) return null;
+  return base - optionDiscountAmount(o);
+}
+
 function optionFinalTotal(o: Option) {
   return optionTotalOrNull(o) ?? 0;
+}
+
+function optionDiscountLabel(o: Option) {
+  const value = typeof o.discountValue === "number" ? o.discountValue : typeof o.discount === "number" ? o.discount : null;
+  if (value === null || value <= 0) return null;
+  if (o.discountType === "percent") return `disc -${value}%`;
+  return `disc -${formatMoneyUSD(value)}`;
 }
 
 const CATEGORY_PRESETS: Record<string, string[]> = {
@@ -486,6 +504,8 @@ export default function ItemDetail() {
           shipping: opt.shipping ?? null,
           taxEstimate: opt.taxEstimate ?? null,
           discount: opt.discount ?? null,
+          discountType: opt.discountType ?? (typeof opt.discount === "number" ? "amount" : null),
+          discountValue: typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null,
           dimensionsText: opt.dimensionsText ?? null,
           dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
           specs: opt.specs ? { ...opt.specs } : null,
@@ -534,6 +554,8 @@ export default function ItemDetail() {
         shipping: opt.shipping ?? null,
         taxEstimate: opt.taxEstimate ?? null,
         discount: opt.discount ?? null,
+        discountType: opt.discountType ?? (typeof opt.discount === "number" ? "amount" : null),
+        discountValue: typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null,
         dimensionsText: opt.dimensionsText ?? null,
         dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
         specs: opt.specs ? { ...opt.specs } : null,
@@ -671,6 +693,14 @@ export default function ItemDetail() {
     const chosen = itemOptions.find((o) => o.id === optionId);
     if (chosen) {
       const preDiscount = optionPreDiscountTotalOrNull(chosen);
+      const optDiscountType =
+        chosen.discountType === "percent" || chosen.discountType === "amount"
+          ? chosen.discountType
+          : typeof chosen.discount === "number"
+            ? "amount"
+            : null;
+      const optDiscountValue =
+        typeof chosen.discountValue === "number" ? chosen.discountValue : typeof chosen.discount === "number" ? chosen.discount : null;
       const next: Partial<Item> = {
         status: "Selected",
         selectedOptionId: chosen.id,
@@ -678,8 +708,8 @@ export default function ItemDetail() {
         store: chosen.store ?? null,
         link: chosen.link ?? null,
         price: preDiscount ?? null,
-        discountType: typeof chosen.discount === "number" ? "amount" : null,
-        discountValue: typeof chosen.discount === "number" ? chosen.discount : null,
+        discountType: optDiscountType,
+        discountValue: optDiscountValue,
         priority: typeof chosen.priority === "number" ? chosen.priority : null,
         tags: chosen.tags ? [...chosen.tags] : null,
         dimensions: chosen.dimensions ? { ...chosen.dimensions } : undefined,
@@ -1465,7 +1495,7 @@ export default function ItemDetail() {
                               {o.price ? <span>price {formatMoneyUSD(o.price)}</span> : null}
                               {o.shipping ? <span>ship {formatMoneyUSD(o.shipping)}</span> : null}
                               {o.taxEstimate ? <span>tax {formatMoneyUSD(o.taxEstimate)}</span> : null}
-                              {o.discount ? <span>disc -{formatMoneyUSD(o.discount)}</span> : null}
+                              {optionDiscountLabel(o) ? <span>{optionDiscountLabel(o)}</span> : null}
                             </div>
                           </button>
 
@@ -1647,13 +1677,95 @@ export default function ItemDetail() {
                                 />
                               </div>
                               <div className="space-y-1.5">
-                                <Label>Discount</Label>
+                                <div className="flex items-center justify-between gap-2">
+                                  <Label>Discount</Label>
+                                  <div className="flex rounded-full border bg-background p-0.5 text-xs">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void updateOption(o.id, {
+                                          discountType: "amount",
+                                          discountValue:
+                                            typeof o.discountValue === "number"
+                                              ? o.discountValue
+                                              : typeof o.discount === "number"
+                                                ? o.discount
+                                                : null,
+                                          discount:
+                                            typeof o.discountValue === "number"
+                                              ? o.discountValue
+                                              : typeof o.discount === "number"
+                                                ? o.discount
+                                                : null,
+                                        })
+                                      }
+                                      className={[
+                                        "rounded-full px-3 py-1 text-xs font-medium",
+                                        o.discountType === "percent" ? "text-muted-foreground" : "bg-foreground text-background",
+                                      ].join(" ")}
+                                    >
+                                      $
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        void updateOption(o.id, {
+                                          discountType: "percent",
+                                          discountValue:
+                                            typeof o.discountValue === "number"
+                                              ? o.discountValue
+                                              : typeof o.discount === "number"
+                                                ? o.discount
+                                                : null,
+                                          discount: null,
+                                        })
+                                      }
+                                      className={[
+                                        "rounded-full px-3 py-1 text-xs font-medium",
+                                        o.discountType === "percent" ? "bg-foreground text-background" : "text-muted-foreground",
+                                      ].join(" ")}
+                                    >
+                                      %
+                                    </button>
+                                  </div>
+                                </div>
                                 <Input
+                                  key={`${o.id}-discount-${o.discountType ?? "amount"}-${o.discountValue ?? ""}-${o.discount ?? ""}`}
                                   inputMode="decimal"
-                                  defaultValue={o.discount === null || o.discount === undefined ? "" : String(o.discount)}
+                                  defaultValue={
+                                    typeof o.discountValue === "number"
+                                      ? String(o.discountValue)
+                                      : typeof o.discount === "number"
+                                        ? String(o.discount)
+                                        : ""
+                                  }
                                   className="h-11 text-base"
-                                  onBlur={(e) => void updateOption(o.id, { discount: parseNumberOrNull(e.target.value) })}
+                                  placeholder={o.discountType === "percent" ? "%" : "$"}
+                                  onBlur={(e) => {
+                                    const v = parseNumberOrNull(e.target.value);
+                                    const type = o.discountType === "percent" ? "percent" : "amount";
+                                    void updateOption(o.id, {
+                                      discountType: type,
+                                      discountValue: v,
+                                      discount: type === "amount" ? v : null,
+                                    });
+                                  }}
                                 />
+                                {(() => {
+                                  const pre = optionPreDiscountTotalOrNull(o);
+                                  const amt = optionDiscountAmount({
+                                    ...o,
+                                    discountType: o.discountType ?? "amount",
+                                    discountValue:
+                                      typeof o.discountValue === "number"
+                                        ? o.discountValue
+                                        : typeof o.discount === "number"
+                                          ? o.discount
+                                          : null,
+                                  });
+                                  if (!pre || !amt) return null;
+                                  return <div className="text-xs text-muted-foreground">Savings: {formatMoneyUSD(amt)}</div>;
+                                })()}
                               </div>
                             </div>
 

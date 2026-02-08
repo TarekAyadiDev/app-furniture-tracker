@@ -108,6 +108,8 @@ export type Option = {
   shipping?: number | null;
   taxEstimate?: number | null;
   discount?: number | null;
+  discountType?: "amount" | "percent" | null;
+  discountValue?: number | null;
   dimensionsText?: string | null;
   dimensions?: Dimensions;
   specs?: Record<string, string | number | boolean | null> | null;

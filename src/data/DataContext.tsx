@@ -8,7 +8,9 @@ import { sanitizeProvenance } from "@/lib/provenance";
 import { DEFAULT_HOME, makeDefaultRooms } from "@/data/seed";
 import {
   idbBulkPut,
+  idbDelete,
   idbGetAll,
+  idbGetAllByIndex,
   idbGetSnapshot,
   idbPut,
   idbResetAll,
@@ -17,7 +19,7 @@ import {
 import { notifyDbChanged, subscribeDbChanges } from "@/storage/notify";
 import { getTownHollywoodExampleBundle } from "@/examples/town-hollywood";
 import { buildRoomNameMap, ensureRoomNames, normalizeRoomName, orderRooms } from "@/lib/rooms";
-import { moveAttachmentsParent } from "@/storage/attachments";
+import { moveAttachmentsParent, type AttachmentRecord } from "@/storage/attachments";
 
 type HomeMeta = NonNullable<ExportBundleV1["home"]>;
 
@@ -32,6 +34,16 @@ type SyncSummary = {
 
 type OptionSortKey = "price" | "priority" | "name";
 type OptionSortDir = "asc" | "desc";
+
+type AttachmentMeta = {
+  id: string;
+  url: string;
+  name: string | null;
+  mime: string | null;
+  size: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
 
 type UpdateOptionFn = {
   (id: string, patch: Partial<Option>): Promise<void>;
@@ -204,14 +216,34 @@ function coerceTags(input: unknown): string[] | null {
   return cleaned.length ? cleaned : null;
 }
 
-function optionTotalOrNull(opt: Option): number | null {
+function optionPreDiscountTotalOrNull(opt: Option): number | null {
   const hasAny =
     typeof opt.price === "number" ||
     typeof opt.shipping === "number" ||
-    typeof opt.taxEstimate === "number" ||
-    typeof opt.discount === "number";
+    typeof opt.taxEstimate === "number";
   if (!hasAny) return null;
-  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
+  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0);
+}
+
+function optionDiscountAmount(opt: Option): number {
+  const value = typeof opt.discountValue === "number" ? opt.discountValue : null;
+  const type = opt.discountType === "percent" || opt.discountType === "amount" ? opt.discountType : null;
+  if (value !== null && value > 0) {
+    if (type === "amount") return value;
+    if (type === "percent") {
+      const base = optionPreDiscountTotalOrNull(opt);
+      if (base === null) return 0;
+      if (value >= 100) return base;
+      return (base * value) / 100;
+    }
+  }
+  return typeof opt.discount === "number" ? opt.discount : 0;
+}
+
+function optionTotalOrNull(opt: Option): number | null {
+  const base = optionPreDiscountTotalOrNull(opt);
+  if (base === null) return null;
+  return base - optionDiscountAmount(opt);
 }
 
 function itemDiscountAmount(item: Item): number | null {
@@ -249,6 +281,48 @@ function dimsFromLegacySpecs(specs: Item["specs"]): Item["dimensions"] | undefin
 function normalizeActor(input: unknown): Actor {
   const t = String(input ?? "").trim();
   return t === "human" || t === "ai" || t === "import" || t === "system" ? (t as Actor) : null;
+}
+
+function parseAttachmentMeta(raw: any): AttachmentMeta | null {
+  if (!raw || typeof raw !== "object") return null;
+  const url = typeof raw.url === "string" ? raw.url.trim() : "";
+  if (!url) return null;
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : newId("att"),
+    url,
+    name: typeof raw.name === "string" ? raw.name : null,
+    mime: typeof raw.mime === "string" ? raw.mime : null,
+    size: typeof raw.size === "number" ? raw.size : null,
+    createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
+  };
+}
+
+function attachmentParentKey(parentType: "item" | "option", parentId: string) {
+  return `${parentType}:${parentId}`;
+}
+
+async function replaceAttachmentsForParent(parentType: "item" | "option", parentId: string, metas: AttachmentMeta[]) {
+  const existing = await idbGetAllByIndex<AttachmentRecord>("attachments", "parentKey", attachmentParentKey(parentType, parentId));
+  const nextIds = new Set(metas.map((m) => m.id));
+  for (const att of existing) {
+    if (!nextIds.has(att.id)) await idbDelete("attachments", att.id);
+  }
+  for (const meta of metas) {
+    await idbPut("attachments", {
+      id: meta.id,
+      parentType,
+      parentId,
+      parentKey: attachmentParentKey(parentType, parentId),
+      name: meta.name,
+      sourceUrl: meta.url,
+      mime: meta.mime,
+      size: meta.size,
+      blob: new Blob([], { type: meta.mime || "" }),
+      createdAt: meta.createdAt,
+      updatedAt: meta.updatedAt,
+    } as AttachmentRecord);
+  }
 }
 
 function sanitizeExportMeta(input: unknown): ExportBundleV1["exportMeta"] | undefined {
@@ -391,6 +465,10 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
             shipping: coerceNumberOrNull((op as any)?.shipping),
             taxEstimate: coerceNumberOrNull((op as any)?.taxEstimate),
             discount: coerceNumberOrNull((op as any)?.discount),
+            discountType: coerceDiscountType((op as any)?.discountType) || (typeof (op as any)?.discount === "number" ? "amount" : null),
+            discountValue:
+              coerceNumberOrNull((op as any)?.discountValue) ??
+              (typeof (op as any)?.discount === "number" ? (op as any).discount : null),
             dimensionsText: typeof (op as any)?.dimensionsText === "string" ? (op as any).dimensionsText : null,
             dimensions: coerceDims((op as any)?.dimensions),
             specs: coerceSpecs((op as any)?.specs),
@@ -499,6 +577,8 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
           shipping: typeof (op as any)?.shipping === "number" ? (op as any).shipping : null,
           taxEstimate: typeof (op as any)?.tax === "number" ? (op as any).tax : null,
           discount: typeof (op as any)?.discount === "number" ? (op as any).discount : null,
+          discountType: typeof (op as any)?.discount === "number" ? "amount" : null,
+          discountValue: typeof (op as any)?.discount === "number" ? (op as any).discount : null,
           dimensionsText: typeof (op as any)?.dimensions === "string" ? (op as any).dimensions : null,
           notes: typeof (op as any)?.notes === "string" ? (op as any).notes : null,
           selected: false,
@@ -865,6 +945,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       link: source.link ?? null,
       price: source.price ?? null,
       discount: itemDiscount ?? null,
+      discountType: source.discountType ?? (itemDiscount ? "amount" : null),
+      discountValue: typeof source.discountValue === "number" ? source.discountValue : itemDiscount ?? null,
       notes: mergedNotes,
       priority: source.priority ?? null,
       tags: coerceTags(source.tags),
@@ -915,6 +997,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       shipping: typeof partial.shipping === "number" ? partial.shipping : null,
       taxEstimate: typeof partial.taxEstimate === "number" ? partial.taxEstimate : null,
       discount: typeof partial.discount === "number" ? partial.discount : null,
+      discountType: coerceDiscountType(partial.discountType) || (typeof partial.discount === "number" ? "amount" : null),
+      discountValue:
+        typeof partial.discountValue === "number"
+          ? partial.discountValue
+          : typeof partial.discount === "number"
+            ? partial.discount
+            : null,
       dimensionsText: typeof partial.dimensionsText === "string" ? partial.dimensionsText : null,
       dimensions: partial.dimensions ? partial.dimensions : undefined,
       specs: partial.specs ? partial.specs : null,
@@ -942,10 +1031,25 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!cur) return;
     const ts = nowMs();
     const nextTags = typeof patch.tags === "undefined" ? cur.tags ?? null : coerceTags(patch.tags);
+    const nextDiscountType =
+      typeof patch.discountType === "undefined"
+        ? cur.discountType ?? (typeof cur.discount === "number" ? "amount" : null)
+        : coerceDiscountType(patch.discountType);
+    const nextDiscountValue =
+      typeof patch.discountValue === "undefined"
+        ? cur.discountValue ?? (typeof cur.discount === "number" ? cur.discount : null)
+        : coerceNumberOrNull(patch.discountValue);
+    const nextDiscount =
+      typeof patch.discount === "undefined"
+        ? cur.discount ?? null
+        : coerceNumberOrNull(patch.discount);
     const next: Option = {
       ...cur,
       ...patch,
       tags: nextTags,
+      discountType: nextDiscountType,
+      discountValue: nextDiscountValue,
+      discount: nextDiscount,
       updatedAt: ts,
       syncState: patch.syncState ?? "dirty",
       provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
@@ -1235,9 +1339,34 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const exportBundle = useCallback(
     async (opts?: { includeDeleted?: boolean }): Promise<ExportBundleV2> => {
       const snap = await idbGetSnapshot();
+      const allAttachments = await idbGetAll<AttachmentRecord>("attachments");
+      const attachmentByParentKey = new Map<string, AttachmentMeta[]>();
+      for (const att of allAttachments) {
+        if (!att.sourceUrl) continue;
+        const entry: AttachmentMeta = {
+          id: att.id,
+          url: att.sourceUrl,
+          name: att.name ?? null,
+          mime: att.mime ?? null,
+          size: typeof att.size === "number" ? att.size : null,
+          createdAt: typeof att.createdAt === "number" ? att.createdAt : Date.now(),
+          updatedAt: typeof att.updatedAt === "number" ? att.updatedAt : Date.now(),
+        };
+        const key = `${att.parentType}:${att.parentId}`;
+        if (!attachmentByParentKey.has(key)) attachmentByParentKey.set(key, []);
+        attachmentByParentKey.get(key)!.push(entry);
+      }
       const includeDeleted = Boolean(opts?.includeDeleted);
-      const itemsOut = includeDeleted ? snap.items : snap.items.filter((i) => i.syncState !== "deleted");
-      const optsOut = includeDeleted ? snap.options : snap.options.filter((o) => o.syncState !== "deleted");
+      const itemsBase = includeDeleted ? snap.items : snap.items.filter((i) => i.syncState !== "deleted");
+      const optsBase = includeDeleted ? snap.options : snap.options.filter((o) => o.syncState !== "deleted");
+      const itemsOut = itemsBase.map((it) => ({
+        ...it,
+        attachments: attachmentByParentKey.get(`item:${it.id}`) || [],
+      })) as any[];
+      const optsOut = optsBase.map((o) => ({
+        ...o,
+        attachments: attachmentByParentKey.get(`option:${o.id}`) || [],
+      })) as any[];
       const measOut = includeDeleted ? snap.measurements : snap.measurements.filter((m) => m.syncState !== "deleted");
       const roomsOut = includeDeleted ? snap.rooms : snap.rooms.filter((r) => r.syncState !== "deleted");
       const homeMeta = sanitizeHomeMeta(snap.meta.home);
@@ -1448,6 +1577,27 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       });
     }
     if (optsToPut.length) await idbBulkPut("options", optsToPut);
+
+    const rawItems = Array.isArray((bundle as any)?.items) ? ((bundle as any).items as any[]) : [];
+    for (const raw of rawItems) {
+      const id = typeof raw?.id === "string" ? raw.id : "";
+      if (!id) continue;
+      const atts = raw?.attachments;
+      if (!Array.isArray(atts)) continue;
+      const metas = atts.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
+      await replaceAttachmentsForParent("item", id, metas);
+    }
+
+    const rawOptions = Array.isArray((bundle as any)?.options) ? ((bundle as any).options as any[]) : [];
+    for (const raw of rawOptions) {
+      const id = typeof raw?.id === "string" ? raw.id : "";
+      if (!id) continue;
+      const atts = raw?.attachments;
+      if (!Array.isArray(atts)) continue;
+      const metas = atts.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
+      await replaceAttachmentsForParent("option", id, metas);
+    }
+
     notifyDbChanged();
   }, []);
 

@@ -6,14 +6,34 @@ import { useData } from "@/data/DataContext";
 
 type Totals = { planned: number; selected: number; spent: number; discount: number; missingPrice: number; count: number };
 
-function optionTotalOrNull(opt: Option): number | null {
+function optionPreDiscountTotalOrNull(opt: Option): number | null {
   const hasAny =
     typeof opt.price === "number" ||
     typeof opt.shipping === "number" ||
-    typeof opt.taxEstimate === "number" ||
-    typeof opt.discount === "number";
+    typeof opt.taxEstimate === "number";
   if (!hasAny) return null;
-  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
+  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0);
+}
+
+function optionDiscountAmount(opt: Option): number {
+  const value = typeof opt.discountValue === "number" ? opt.discountValue : null;
+  const type = opt.discountType === "percent" || opt.discountType === "amount" ? opt.discountType : null;
+  if (value !== null && value > 0) {
+    if (type === "amount") return value;
+    if (type === "percent") {
+      const base = optionPreDiscountTotalOrNull(opt);
+      if (base === null) return 0;
+      if (value >= 100) return base;
+      return (base * value) / 100;
+    }
+  }
+  return typeof opt.discount === "number" ? opt.discount : 0;
+}
+
+function optionTotalOrNull(opt: Option): number | null {
+  const base = optionPreDiscountTotalOrNull(opt);
+  if (base === null) return null;
+  return base - optionDiscountAmount(opt);
 }
 
 function itemDiscountAmount(item: Item): number | null {
