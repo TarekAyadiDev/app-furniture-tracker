@@ -102,32 +102,32 @@ export default function Shopping() {
   }
 
   return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="shop_name" className="text-sm">
-              Quick add
-            </Label>
+    <div className="space-y-5">
+      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="shop_name" className="text-xs font-semibold uppercase tracking-widest text-primary">
+              Add New Item
+            </label>
             <Input
               id="shop_name"
               ref={nameRef}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Queen mattress protector"
-              className="h-12 text-base"
+              className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
               autoComplete="off"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="shop_room">Room</Label>
+              <label htmlFor="shop_room" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
               <select
                 id="shop_room"
                 value={room}
                 onChange={(e) => setRoom(e.target.value as RoomId)}
-                className="h-12 w-full rounded-md border bg-background px-3 text-base"
+                className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               >
                 {orderedRoomIds.map((r) => (
                   <option key={r} value={r}>
@@ -137,45 +137,38 @@ export default function Shopping() {
               </select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="shop_price">Price</Label>
-              <Input
-                id="shop_price"
-                inputMode="decimal"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="$"
-                className="h-12 text-base"
-              />
+              <label htmlFor="shop_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                <Input
+                  id="shop_price"
+                  inputMode="decimal"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  placeholder="0"
+                  className="h-12 rounded-xl pl-7 text-base focus:ring-2 focus:ring-ring"
+                />
+              </div>
             </div>
           </div>
 
           <div className="space-y-2">
-            <div className="text-sm font-medium">Status</div>
-            <div className="flex flex-wrap gap-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</label>
+            <div className="mt-2 flex flex-wrap gap-2">
               {(["Idea", "Shortlist", "Selected"] as ItemStatus[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setStatus(s)}
-                  className={[
-                    "rounded-full border px-3 py-2 text-sm font-medium",
-                    s === status ? "border-foreground bg-foreground text-background" : "bg-background",
-                  ].join(" ")}
-                >
-                  {s}
-                </button>
+                <StatusBadge key={s} status={s} selected={status === s} onClick={() => setStatus(s)} />
               ))}
             </div>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="shop_store">Store (optional)</Label>
+            <label htmlFor="shop_store" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Store (optional)</label>
             <Input
               id="shop_store"
               value={store}
               onChange={(e) => setStore(e.target.value)}
               placeholder="IKEA, Target, Article..."
-              className="h-12 text-base"
+              className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
             />
             {recentStores.length ? (
               <div className="flex flex-wrap gap-2 pt-1">
@@ -184,7 +177,7 @@ export default function Shopping() {
                     key={s}
                     type="button"
                     onClick={() => setStore(s)}
-                    className="rounded-full border bg-background px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+                    className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-95"
                   >
                     {s}
                   </button>
@@ -194,26 +187,26 @@ export default function Shopping() {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="shop_notes">Notes (voice-friendly)</Label>
+            <label htmlFor="shop_notes" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</label>
             <Textarea
               id="shop_notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Material, size, color, delivery notes..."
-              className="min-h-[88px] text-base"
+              className="min-h-[88px] resize-none rounded-xl text-base focus:ring-2 focus:ring-ring"
             />
           </div>
 
           {recentRooms.length ? (
             <div className="space-y-2">
-              <div className="text-sm font-medium">Recent rooms</div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent rooms</label>
               <div className="flex flex-wrap gap-2">
                 {recentRooms.slice(0, 6).map((r) => (
                   <button
                     key={r}
                     type="button"
                     onClick={() => setRoom(r as RoomId)}
-                    className="rounded-full border bg-background px-3 py-2 text-sm hover:text-foreground"
+                    className="rounded-full border border-border bg-background px-3 py-2 text-sm transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-95"
                   >
                     {roomNameById.get(r as RoomId) || r}
                   </button>
@@ -222,47 +215,47 @@ export default function Shopping() {
             </div>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-3 pt-1">
-            <Button className="h-12 text-base" onClick={() => onAdd(false)}>
-              Add
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <Button className="h-12 rounded-xl text-base shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98]" onClick={() => onAdd(false)}>
+              Add Item
             </Button>
-            <Button variant="secondary" className="h-12 text-base" onClick={() => onAdd(true)}>
-              Add & edit
+            <Button variant="secondary" className="h-12 rounded-xl text-base transition-all duration-150 active:scale-[0.98]" onClick={() => onAdd(true)}>
+              Add & Edit
             </Button>
           </div>
         </div>
       </Card>
 
-      <Card className="p-4">
+      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-sm font-semibold">Recent</div>
-            <div className="text-xs text-muted-foreground">Tap an item to edit. Long lists live in Items.</div>
+            <h2 className="font-heading text-lg font-semibold text-foreground">Recently Added</h2>
+            <p className="text-xs text-muted-foreground">Tap to view details</p>
           </div>
-          <Button variant="ghost" onClick={() => nav("/items")}>
-            View all
+          <Button variant="ghost" className="rounded-xl text-primary hover:bg-primary/10" onClick={() => nav("/items")}>
+            View All
           </Button>
         </div>
-        <div className="mt-3 space-y-2">
+        <div className="mt-4 space-y-3">
           {recentItems.length ? (
             recentItems.map((it) => (
               <button
                 key={it.id}
                 type="button"
                 onClick={() => nav(`/items/${it.id}`)}
-                className="w-full rounded-lg border bg-background px-3 py-3 text-left hover:bg-accent"
+                className="group w-full rounded-2xl border border-border bg-card p-4 text-left transition-all duration-200 hover:shadow-md active:scale-[0.98]"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-base font-semibold">{it.name}</div>
-                    <div className="truncate text-xs text-muted-foreground">
+                    <div className="truncate font-body text-base font-semibold text-card-foreground">{it.name}</div>
+                    <div className="mt-1 truncate text-xs text-muted-foreground">
                       {roomNameById.get(it.room) || it.room}
-                      {it.store ? ` \u00b7 ${it.store}` : ""}
-                      {it.price ? ` \u00b7 ${formatMoneyUSD(it.price)}` : ""}
+                      {it.store ? ` · ${it.store}` : ""}
+                      {it.price ? ` · ${formatMoneyUSD(it.price)}` : ""}
                     </div>
                   </div>
                   <div className="shrink-0">
-                    <StatusBadge status={it.status} />
+                    <StatusBadge status={it.status} size="sm" />
                   </div>
                 </div>
               </button>

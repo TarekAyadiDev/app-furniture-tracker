@@ -2,25 +2,42 @@ import type { ItemStatus } from "@/lib/domain";
 import { cn } from "@/lib/utils";
 
 const STYLES: Record<ItemStatus, string> = {
-  Idea: "bg-slate-100 text-slate-800 border-slate-200",
-  Shortlist: "bg-blue-50 text-blue-900 border-blue-200",
-  Selected: "bg-teal-50 text-teal-900 border-teal-200",
-  Ordered: "bg-amber-50 text-amber-900 border-amber-200",
-  Delivered: "bg-green-50 text-green-900 border-green-200",
-  Installed: "bg-emerald-50 text-emerald-900 border-emerald-200",
+  Idea: "bg-muted/80 text-muted-foreground",
+  Shortlist: "bg-info/15 text-info",
+  Selected: "bg-primary/15 text-primary",
+  Ordered: "bg-warning/20 text-warning",
+  Delivered: "bg-accent/20 text-accent",
+  Installed: "bg-success/20 text-success",
 };
 
-export function StatusBadge({ status, className }: { status: ItemStatus; className?: string }) {
+interface StatusBadgeProps {
+  status: ItemStatus;
+  className?: string;
+  selected?: boolean;
+  onClick?: () => void;
+  size?: "sm" | "md";
+}
+
+export function StatusBadge({ status, className, selected, onClick, size = "md" }: StatusBadgeProps) {
+  const isClickable = !!onClick;
+
   return (
-    <span
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!isClickable}
       className={cn(
-        "inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium",
+        "inline-flex items-center rounded-full font-medium transition-all duration-200",
+        size === "sm" ? "px-2.5 py-0.5 text-xs" : "px-3.5 py-1.5 text-sm",
         STYLES[status],
+        selected && "ring-2 ring-primary ring-offset-2 ring-offset-background shadow-glow",
+        isClickable
+          ? "cursor-pointer hover:scale-105 active:scale-95"
+          : "cursor-default",
         className,
       )}
     >
       {status}
-    </span>
+    </button>
   );
 }
-

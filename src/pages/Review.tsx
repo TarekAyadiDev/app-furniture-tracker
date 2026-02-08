@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { useData } from "@/data/DataContext";
 import type { DataSource, ReviewStatus, RoomId } from "@/lib/domain";
 import { nowMs } from "@/lib/format";
-import { markProvenanceNeedsReview, markProvenanceVerified, reviewStatusNeedsAttention } from "@/lib/provenance";
+import { markProvenanceVerified, reviewStatusNeedsAttention } from "@/lib/provenance";
 
 type TypeFilter = "All" | "measurement" | "item" | "option";
 type RoomFilter = "All" | RoomId;
@@ -210,25 +210,6 @@ export default function Review() {
     await updateOption(row.id, { provenance: markProvenanceVerified(op.provenance, at) });
   }
 
-  async function markNeedsReview(row: ReviewRow) {
-    const at = nowMs();
-    if (row.type === "measurement") {
-      const m = measurements.find((x) => x.id === row.id);
-      if (!m) return;
-      await updateMeasurement(row.id, { provenance: markProvenanceNeedsReview(m.provenance, at) });
-      return;
-    }
-    if (row.type === "item") {
-      const it = items.find((x) => x.id === row.id);
-      if (!it) return;
-      await updateItem(row.id, { provenance: markProvenanceNeedsReview(it.provenance, at) });
-      return;
-    }
-    const op = options.find((x) => x.id === row.id);
-    if (!op) return;
-    await updateOption(row.id, { provenance: markProvenanceNeedsReview(op.provenance, at) });
-  }
-
   async function markAllVisibleVerified() {
     if (!filtered.length) return;
     setBusy(true);
@@ -378,9 +359,6 @@ export default function Review() {
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => nav(r.href)} disabled={busy}>
                       Open
-                    </Button>
-                    <Button size="sm" variant="secondary" onClick={() => void markNeedsReview(r)} disabled={busy}>
-                      Needs review
                     </Button>
                     {canShowChanges ? (
                       <Button

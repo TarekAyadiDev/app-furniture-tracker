@@ -132,22 +132,22 @@ export default function Items() {
   }, [roomFilter, statusFilter, storeFilter, minPrice, maxPrice]);
 
   return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <div className="flex items-center gap-2">
+    <div className="space-y-5">
+      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+        <div className="flex items-center gap-3">
           <button
             type="button"
-            className="flex h-12 flex-1 items-center rounded-md border bg-background px-3 text-left text-base text-muted-foreground"
+            className="flex h-12 flex-1 items-center gap-2 rounded-xl border border-border/50 bg-background/50 px-4 text-left text-base text-muted-foreground transition-all duration-200 hover:border-primary/30 focus:outline-none focus:ring-2 focus:ring-primary/30"
             onClick={() => {
               setFiltersOpen(true);
               setTimeout(() => searchRef.current?.focus(), 0);
             }}
           >
-            {q.trim() ? <span className="text-foreground">{q.trim()}</span> : <span>Search (press /)</span>}
+            {q.trim() ? <span className="text-foreground">{q.trim()}</span> : <span>Search items...</span>}
           </button>
           <Button
             variant={filtersOpen ? "default" : "secondary"}
-            className="h-12"
+            className="h-12 rounded-xl px-5 transition-all duration-200 active:scale-[0.98]"
             onClick={() => setFiltersOpen((v) => !v)}
           >
             Filter{activeFilterCount ? ` (${activeFilterCount})` : ""}
@@ -155,22 +155,22 @@ export default function Items() {
         </div>
 
         <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen}>
-          <CollapsibleContent className="mt-3 space-y-3">
+          <CollapsibleContent className="mt-5 space-y-4">
             <Input
               ref={searchRef}
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search..."
-              className="h-12 text-base"
+              placeholder="Search items..."
+              className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
             />
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="text-xs font-medium text-muted-foreground">Room</div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
                 <select
                   value={roomFilter}
                   onChange={(e) => setRoomFilter(e.target.value as RoomFilter)}
-                  className="mt-1 h-11 w-full rounded-md border bg-background px-3 text-base"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="All">All</option>
                   {orderedRoomIds.map((r) => (
@@ -181,11 +181,11 @@ export default function Items() {
                 </select>
               </div>
               <div>
-                <div className="text-xs font-medium text-muted-foreground">Status</div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</label>
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                  className="mt-1 h-11 w-full rounded-md border bg-background px-3 text-base"
+                  className="mt-1.5 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                 >
                   <option value="All">All</option>
                   {ITEM_STATUSES.map((s) => (
@@ -198,34 +198,34 @@ export default function Items() {
             </div>
 
             <div>
-              <div className="text-xs font-medium text-muted-foreground">Store</div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Store</label>
               <Input
                 value={storeFilter}
                 onChange={(e) => setStoreFilter(e.target.value)}
                 placeholder="Filter by store"
-                className="mt-1 h-11 text-base"
+                className="mt-1.5 h-11 rounded-xl text-base focus:ring-2 focus:ring-ring"
               />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <div className="text-xs font-medium text-muted-foreground">Min price</div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Min price</label>
                 <Input
                   inputMode="decimal"
                   value={minPrice}
                   onChange={(e) => setMinPrice(e.target.value)}
                   placeholder="$"
-                  className="mt-1 h-11 text-base"
+                  className="mt-1.5 h-11 rounded-xl text-base focus:ring-2 focus:ring-ring"
                 />
               </div>
               <div>
-                <div className="text-xs font-medium text-muted-foreground">Max price</div>
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Max price</label>
                 <Input
                   inputMode="decimal"
                   value={maxPrice}
                   onChange={(e) => setMaxPrice(e.target.value)}
                   placeholder="$"
-                  className="mt-1 h-11 text-base"
+                  className="mt-1.5 h-11 rounded-xl text-base focus:ring-2 focus:ring-ring"
                 />
               </div>
             </div>
@@ -237,17 +237,17 @@ export default function Items() {
         </Collapsible>
       </Card>
 
-      <Accordion type="multiple" className="space-y-2">
+      <Accordion type="multiple" className="space-y-3">
         {orderedRoomIds.map((r) => {
           const group = byRoom.get(r) || [];
           if (!group.length) return null;
           const openReorder = reorderRoomId === r;
           return (
-            <AccordionItem key={r} value={r} className="rounded-lg border bg-background px-4">
+            <AccordionItem key={r} value={r} className="rounded-2xl border border-border bg-card px-4 shadow-sm">
               <AccordionTrigger className="py-3 hover:no-underline">
-                <div className="flex w-full items-baseline justify-between gap-3 pr-2 text-left">
-                  <div className="text-sm font-semibold">{roomNameById.get(r) || r}</div>
-                  <div className="text-xs text-muted-foreground">{group.length}</div>
+                <div className="flex w-full items-center justify-between gap-3 pr-2 text-left">
+                  <h3 className="font-heading text-base text-card-foreground">{roomNameById.get(r) || r}</h3>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{group.length}</span>
                 </div>
               </AccordionTrigger>
               <AccordionContent>
@@ -369,7 +369,7 @@ export default function Items() {
           </Button>
         </div>
       </Card>
-    </div>
+    </div >
   );
 }
 
@@ -453,7 +453,7 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
         <div className="text-[11px] text-muted-foreground">No photos</div>
       )}
       <Button type="button" size="sm" variant="secondary" className="h-7 px-2 text-[11px]" onClick={() => void onAddFromUrl()}>
-        Add link
+        Add photo
       </Button>
     </div>
   );

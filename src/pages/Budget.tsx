@@ -59,87 +59,88 @@ export default function Budget() {
   }, [activeItems]);
 
   return (
-    <div className="space-y-4">
-      <Card className="p-4">
-        <div className="text-sm font-semibold">Totals</div>
-        <div className="mt-3 grid grid-cols-3 gap-3">
-          <div className="rounded-lg border bg-background p-3">
-            <div className="text-xs text-muted-foreground">Planned</div>
-            <div className="mt-1 text-base font-semibold">{formatMoneyUSD(totals.planned)}</div>
+    <div className="space-y-5">
+      <Card className="glass rounded-2xl border border-border/50 p-6 shadow-elegant">
+        <p className="text-xs font-semibold uppercase tracking-widest text-primary">Total Investment</p>
+        <p className="mt-2 font-heading text-4xl font-bold text-gradient">{formatMoneyUSD(totals.planned + totals.selected + totals.spent)}</p>
+        <div className="mt-5 grid grid-cols-3 gap-3">
+          <div className="rounded-xl border border-border/50 bg-background/50 p-3 text-center">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Planned</p>
+            <p className="mt-1 font-heading text-lg font-semibold text-foreground">{formatMoneyUSD(totals.planned)}</p>
           </div>
-          <div className="rounded-lg border bg-background p-3">
-            <div className="text-xs text-muted-foreground">Selected</div>
-            <div className="mt-1 text-base font-semibold">{formatMoneyUSD(totals.selected)}</div>
+          <div className="rounded-xl border border-border/50 bg-background/50 p-3 text-center">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Selected</p>
+            <p className="mt-1 font-heading text-lg font-semibold text-primary">{formatMoneyUSD(totals.selected)}</p>
           </div>
-          <div className="rounded-lg border bg-background p-3">
-            <div className="text-xs text-muted-foreground">Spent</div>
-            <div className="mt-1 text-base font-semibold">{formatMoneyUSD(totals.spent)}</div>
+          <div className="rounded-xl border border-border/50 bg-background/50 p-3 text-center">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Spent</p>
+            <p className="mt-1 font-heading text-lg font-semibold text-success">{formatMoneyUSD(totals.spent)}</p>
           </div>
         </div>
-        <div className="mt-3 text-xs text-muted-foreground">
-          {totals.count} item(s). {totals.missingPrice} missing price.
-        </div>
+        <p className="mt-4 text-xs text-muted-foreground">
+          {totals.count} item(s) tracked • {totals.missingPrice} need pricing
+        </p>
       </Card>
 
-      <Card className="p-4">
-        <div className="text-sm font-semibold">By room</div>
-        <div className="mt-3 space-y-2">
+      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+        <h2 className="font-heading text-lg font-semibold text-foreground">By Room</h2>
+        <div className="mt-4 space-y-3">
           {orderedRoomIds.map((r) => {
             const t = byRoom.get(r)!;
             const total = t.planned + t.selected + t.spent;
             return (
-              <div key={r} className="rounded-lg border bg-background p-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="text-base font-semibold">{roomNameById.get(r) || r}</div>
-                  <div className="text-sm font-semibold">{formatMoneyUSD(total)}</div>
+              <div key={r} className="rounded-xl border border-border bg-card p-4 transition-all duration-200 hover:shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-heading text-base text-card-foreground">{roomNameById.get(r) || r}</h3>
+                  <p className="font-body text-base font-bold text-foreground">{formatMoneyUSD(total)}</p>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                   <div>
-                    <div>Planned</div>
-                    <div className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.planned)}</div>
+                    <p>Planned</p>
+                    <p className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.planned)}</p>
                   </div>
                   <div>
-                    <div>Selected</div>
-                    <div className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.selected)}</div>
+                    <p>Selected</p>
+                    <p className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.selected)}</p>
                   </div>
                   <div>
-                    <div>Spent</div>
-                    <div className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.spent)}</div>
+                    <p>Spent</p>
+                    <p className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.spent)}</p>
                   </div>
                 </div>
-                {t.missingPrice ? <div className="mt-2 text-xs text-muted-foreground">{t.missingPrice} missing price</div> : null}
+                {t.missingPrice ? <p className="mt-2 text-xs text-muted-foreground">{t.missingPrice} missing price</p> : null}
               </div>
             );
           })}
         </div>
       </Card>
 
-      <Card className="p-4">
-        <div className="text-sm font-semibold">By category</div>
-        <div className="mt-3 space-y-2">
+      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+        <h2 className="font-heading text-lg font-semibold text-foreground">By Category</h2>
+        <div className="mt-4 space-y-3">
           {byCategory.map(([cat, t]) => {
             const total = t.planned + t.selected + t.spent;
             return (
-              <div key={cat} className="rounded-lg border bg-background p-3">
-                <div className="flex items-baseline justify-between gap-3">
-                  <div className="min-w-0 truncate text-base font-semibold">{cat}</div>
-                  <div className="text-sm font-semibold">{formatMoneyUSD(total)}</div>
+              <div key={cat} className="rounded-xl border border-border bg-card p-4 transition-all duration-200 hover:shadow-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="min-w-0 truncate font-heading text-base text-card-foreground">{cat}</h3>
+                  <p className="font-body text-base font-bold text-foreground">{formatMoneyUSD(total)}</p>
                 </div>
                 <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
                   <div>
-                    <div>Planned</div>
-                    <div className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.planned)}</div>
+                    <p>Planned</p>
+                    <p className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.planned)}</p>
                   </div>
                   <div>
-                    <div>Selected</div>
-                    <div className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.selected)}</div>
+                    <p>Selected</p>
+                    <p className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.selected)}</p>
                   </div>
                   <div>
-                    <div>Spent</div>
-                    <div className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.spent)}</div>
+                    <p>Spent</p>
+                    <p className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.spent)}</p>
                   </div>
                 </div>
-                {t.missingPrice ? <div className="mt-2 text-xs text-muted-foreground">{t.missingPrice} missing price</div> : null}
+                {t.missingPrice ? <p className="mt-2 text-xs text-muted-foreground">{t.missingPrice} missing price</p> : null}
               </div>
             );
           })}

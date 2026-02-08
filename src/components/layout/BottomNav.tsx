@@ -1,6 +1,6 @@
 import type { ComponentType } from "react";
-import { AlertTriangle, DollarSign, LayoutGrid, ListChecks, Settings, ShoppingBag } from "lucide-react";
-import { NavLink } from "@/components/NavLink";
+import { DollarSign, LayoutGrid, ListChecks, Settings, ShoppingBag, Star } from "lucide-react";
+import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
 type NavItem = {
@@ -13,29 +13,44 @@ const NAV: NavItem[] = [
   { to: "/shopping", label: "Shop", icon: ShoppingBag },
   { to: "/items", label: "Items", icon: ListChecks },
   { to: "/rooms", label: "Rooms", icon: LayoutGrid },
-  { to: "/review", label: "Review", icon: AlertTriangle },
+  { to: "/review", label: "Review", icon: Star },
   { to: "/budget", label: "Budget", icon: DollarSign },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function BottomNav() {
+  const location = useLocation();
+
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-      <div className="mx-auto flex max-w-3xl pb-[env(safe-area-inset-bottom)]">
+    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/30 glass safe-bottom">
+      <div className="mx-auto flex max-w-3xl items-center justify-around px-1 py-2">
         {NAV.map((n) => {
           const Icon = n.icon;
+          const isActive = location.pathname === n.to || location.pathname.startsWith(n.to + "/");
           return (
             <NavLink
               key={n.to}
               to={n.to}
               className={cn(
-                "flex flex-1 flex-col items-center justify-center gap-1 px-2 py-3 text-xs text-muted-foreground",
-                "hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "relative flex flex-col items-center gap-1 rounded-2xl px-4 py-2 text-[10px] font-medium transition-all duration-300",
+                isActive
+                  ? "text-primary"
+                  : "text-muted-foreground hover:text-foreground"
               )}
-              activeClassName="text-foreground"
             >
-              <Icon className="h-5 w-5" />
-              <span className="leading-none">{n.label}</span>
+              {/* Active background glow */}
+              {isActive && (
+                <span className="absolute inset-0 rounded-2xl bg-primary/10 animate-fade-in" />
+              )}
+              <Icon className={cn(
+                "relative h-5 w-5 transition-all duration-300",
+                isActive && "scale-110 stroke-[2.5]"
+              )} />
+              <span className="relative">{n.label}</span>
+              {/* Active indicator dot */}
+              {isActive && (
+                <span className="absolute -bottom-0.5 h-1 w-1 rounded-full bg-primary" />
+              )}
             </NavLink>
           );
         })}

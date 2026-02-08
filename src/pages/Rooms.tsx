@@ -14,7 +14,7 @@ import { normalizeRoomName } from "@/lib/rooms";
 export default function Rooms() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { rooms, orderedRooms, roomNameById, measurements, items, reorderRooms, createRoom, updateRoom, deleteRoom } = useData();
+  const { rooms, orderedRooms, roomNameById, measurements, reorderRooms, createRoom, updateRoom } = useData();
   const [reorderMode, setReorderMode] = useState(false);
   const [newRoomName, setNewRoomName] = useState("");
 
@@ -25,26 +25,6 @@ export default function Rooms() {
     for (const r of rooms) m.set(r.id, r.notes || "");
     return m;
   }, [rooms]);
-
-  const itemCountByRoom = useMemo(() => {
-    const m = new Map<RoomId, number>();
-    for (const r of orderedRooms) m.set(r.id, 0);
-    for (const it of items) {
-      if (it.syncState === "deleted") continue;
-      m.set(it.room, (m.get(it.room) || 0) + 1);
-    }
-    return m;
-  }, [items, orderedRooms]);
-
-  const measurementCountByRoom = useMemo(() => {
-    const m = new Map<RoomId, number>();
-    for (const r of orderedRooms) m.set(r.id, 0);
-    for (const meas of measurements) {
-      if (meas.syncState === "deleted") continue;
-      m.set(meas.room, (m.get(meas.room) || 0) + 1);
-    }
-    return m;
-  }, [measurements, orderedRooms]);
 
   const measurementByRoom = useMemo(() => {
     const m = new Map<RoomId, typeof measurements>();
@@ -99,55 +79,22 @@ export default function Rooms() {
     toast({ title: "Room renamed", description: normalized });
   }
 
-  async function onDeleteRoom(room: Room) {
-    if (orderedRooms.length <= 1) {
-      toast({ title: "Can't delete last room", description: "Create another room first." });
-      return;
-    }
-    const itemCount = itemCountByRoom.get(room.id) || 0;
-    const measCount = measurementCountByRoom.get(room.id) || 0;
-    if (itemCount || measCount) {
-      const choices = orderedRooms.filter((r) => r.id !== room.id);
-      const suggested = choices[0];
-      const dest = prompt(
-        `"${room.name}" has ${itemCount} item(s) and ${measCount} measurement(s).\n` +
-          `Type destination room name to move them:`,
-        suggested?.name || "",
-      );
-      if (!dest) return;
-      const destName = normalizeRoomName(dest).toLowerCase();
-      const target =
-        choices.find((r) => normalizeRoomName(r.name).toLowerCase() === destName) ||
-        choices.find((r) => String(r.id).toLowerCase() === destName);
-      if (!target) {
-        toast({ title: "Room not found", description: dest });
-        return;
-      }
-      await deleteRoom(room.id, { moveTo: target.id });
-      toast({ title: "Room deleted", description: `Moved items to ${target.name}` });
-      return;
-    }
-    if (!confirm(`Delete room "${room.name}"?`)) return;
-    await deleteRoom(room.id);
-    toast({ title: "Room deleted", description: room.name });
-  }
-
   return (
-    <div className="space-y-3">
-      <Card className="p-4">
-        <div className="text-sm font-semibold">Add room</div>
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+    <div className="space-y-5">
+      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+        <label className="text-xs font-semibold uppercase tracking-widest text-primary">Add Room</label>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row">
           <Input
             value={newRoomName}
             onChange={(e) => setNewRoomName(e.target.value)}
             placeholder="e.g. Office, Nursery, Patio..."
-            className="h-11 flex-1 text-base"
+            className="h-12 flex-1 rounded-xl border-border/50 bg-background/50 text-base focus:ring-2 focus:ring-primary/30"
           />
-          <Button className="h-11" onClick={() => void onAddRoom()}>
-            Add
+          <Button className="h-12 rounded-xl px-6 transition-all duration-200 active:scale-[0.98]" onClick={() => void onAddRoom()}>
+            Add Room
           </Button>
         </div>
-        <div className="mt-2 text-xs text-muted-foreground">Rooms are used across Items, Shopping, and Measurements.</div>
+        <p className="mt-3 text-xs text-muted-foreground">Rooms organize your furniture across all pages.</p>
       </Card>
 
       {orderedRooms.map((room) => {
@@ -166,35 +113,32 @@ export default function Rooms() {
         const preview = snippet ? (snippet.length > 120 ? `${snippet.slice(0, 120)}\u2026` : snippet) : "";
         const top = list.slice(0, 2);
         return (
-          <Card key={rid} className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-base font-semibold">
+          <Card key={rid} className="glass rounded-2xl border border-border/50 p-5 shadow-elegant transition-all duration-300 hover:shadow-lg hover:border-primary/20">
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <h3 className="font-heading text-lg font-semibold text-card-foreground">
                   {roomLabel}
                   {sizeText ? <span className="ml-2 text-xs font-normal text-muted-foreground">{sizeText}</span> : null}
-                </div>
-                <div className="mt-1 text-xs text-muted-foreground">{list.length} measurement(s)</div>
-                {preview ? <div className="mt-2 whitespace-pre-wrap text-sm">{preview}</div> : null}
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">{list.length} measurement(s)</p>
+                {preview ? <p className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">{preview}</p> : null}
                 {top.length ? (
                   <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                     {top.map((m) => (
                       <div key={m.id} className="flex items-baseline justify-between gap-3">
-                        <div className="min-w-0 truncate">{m.label}</div>
-                        <div className="shrink-0 font-medium text-foreground">{formatInAndCm(m.valueIn)}</div>
+                        <span className="min-w-0 truncate">{m.label}</span>
+                        <span className="shrink-0 font-medium text-foreground">{formatInAndCm(m.valueIn)}</span>
                       </div>
                     ))}
                   </div>
                 ) : null}
               </div>
               <div className="flex shrink-0 flex-col gap-2">
-                <Button variant="secondary" onClick={() => nav(`/rooms/${encodeURIComponent(rid)}`)}>
+                <Button variant="secondary" className="rounded-xl transition-all duration-150 active:scale-95" onClick={() => nav(`/rooms/${encodeURIComponent(rid)}`)}>
                   Open
                 </Button>
-                <Button variant="secondary" onClick={() => void onRenameRoom(room)}>
+                <Button variant="secondary" className="rounded-xl transition-all duration-150 active:scale-95" onClick={() => void onRenameRoom(room)}>
                   Rename
-                </Button>
-                <Button variant="destructive" onClick={() => void onDeleteRoom(room)}>
-                  Delete
                 </Button>
               </div>
             </div>
@@ -202,9 +146,9 @@ export default function Rooms() {
         );
       })}
 
-      <Card className="p-4">
-        <div className="text-sm font-semibold">Reorder rooms</div>
-        <div className="mt-1 text-xs text-muted-foreground">Drag the handle to reorder rooms.</div>
+      <Card className="rounded-2xl border border-border p-4 shadow-sm">
+        <h2 className="font-heading text-lg text-foreground">Reorder rooms</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Drag the handle to reorder rooms.</p>
         {reorderMode ? (
           <div className="mt-3">
             <DragReorderList
@@ -219,7 +163,7 @@ export default function Rooms() {
         <div className="mt-3">
           <Button
             variant={reorderMode ? "default" : "secondary"}
-            className="w-full"
+            className="w-full rounded-xl transition-all duration-150 active:scale-[0.98]"
             onClick={() => setReorderMode((v) => !v)}
           >
             {reorderMode ? "Done" : "Reorder"}
