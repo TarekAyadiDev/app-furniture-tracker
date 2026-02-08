@@ -1,0 +1,183 @@
+{
+  "version": 2,
+  "exportedAt": null,
+  "exportMeta": {
+    "exportedBy": "template_skeleton",
+    "schemaVersion": 2,
+    "sessionId": null
+  },
+  "home": {
+    "name": "Project Name (e.g., Town Hollywood)",
+    "tags": [],
+    "description": "Project description..."
+  },
+  "planner": {
+    "version": 1,
+    "template": {
+      "units": {
+        "primary": "in",
+        "secondary": "cm_in_brackets",
+        "format_example": "60 [152.4]"
+      },
+      "measurement_rules": {
+        "always_capture": [
+          "clear_width",
+          "clear_length",
+          "ceiling_height",
+          "door_clear_width",
+          "outlet_locations"
+        ],
+        "how_to_measure_walls": [
+          "Measure total length -> subtract obstructions -> record obstruction size/location."
+        ]
+      },
+      "rooms": [
+        {
+          "name": "Entry / Foyer",
+          "category": "circulation",
+          "known_measures": {}
+        },
+        {
+          "name": "Great Room / Living",
+          "category": "living",
+          "known_measures": {}
+        },
+        {
+          "name": "Dining Area",
+          "category": "living",
+          "known_measures": {}
+        },
+        {
+          "name": "Kitchen",
+          "category": "kitchen",
+          "known_measures": {}
+        },
+        {
+          "name": "Primary Bedroom (Master)",
+          "category": "bedroom",
+          "known_measures": {}
+        },
+        {
+          "name": "Bedroom 2",
+          "category": "bedroom",
+          "known_measures": {}
+        },
+        {
+          "name": "Bath (Primary)",
+          "category": "bathroom",
+          "known_measures": {}
+        },
+        {
+          "name": "Bath (Guest)",
+          "category": "bathroom",
+          "known_measures": {}
+        },
+        {
+          "name": "Balcony",
+          "category": "outdoor",
+          "known_measures": {}
+        }
+      ],
+      "known_interior_measures_so_far": {
+        "Primary Bedroom (Master)": {},
+        "Bedroom 2": {},
+        "Great Room": {},
+        "Dining Zone": {},
+        "Kitchen Zone": {},
+        "Balcony": {}
+      }
+    }
+  },
+  "rooms": [
+    {
+      "id": "Master",
+      "sort": 0,
+      "notes": ""
+    },
+    {
+      "id": "Bedroom2",
+      "sort": 1,
+      "notes": ""
+    },
+    {
+      "id": "Living",
+      "sort": 2,
+      "notes": ""
+    },
+    {
+      "id": "Dining",
+      "sort": 3,
+      "notes": ""
+    },
+    {
+      "id": "Kitchen",
+      "sort": 4,
+      "notes": ""
+    },
+    {
+      "id": "Bath",
+      "sort": 5,
+      "notes": ""
+    },
+    {
+      "id": "Balcony",
+      "sort": 6,
+      "notes": ""
+    },
+    {
+      "id": "Entry",
+      "sort": 7,
+      "notes": ""
+    }
+  ],
+  "measurements": [
+    {
+      "id": "TEMPLATE_MEASURE_UUID",
+      "room": "Living",
+      "label": "Description of measure",
+      "valueIn": 0.0,
+      "sort": 0,
+      "confidence": "high",
+      "notes": "Optional notes",
+      "provenance": {
+        "lastEditedBy": "human_partner",
+        "lastEditedAt": null,
+        "sourceRef": "Filename or Source",
+        "dataSource": "verified_document",
+        "reviewStatus": "verified"
+      }
+    }
+  ],
+  "items": [
+    {
+      "id": "TEMPLATE_ITEM_UUID",
+      "name": "Item Name",
+      "room": "Living",
+      "category": "Sofa",
+      "status": "Idea",
+      "qty": 1,
+      "priority": 1,
+      "specs": {
+        "width_in": 0,
+        "depth_in": 0,
+        "color": "Neutral"
+      },
+      "provenance": {
+        "lastEditedBy": "human",
+        "dataSource": "manual_entry"
+      }
+    }
+  ],
+  "options": [
+    {
+      "id": "TEMPLATE_OPTION_UUID",
+      "itemId": "LINK_TO_ITEM_UUID",
+      "title": "Product Title",
+      "store": "Store Name",
+      "link": "https://...",
+      "price": 0.00,
+      "dimensionsText": "0x0x0 in",
+      "selected": false
+    }
+  ]
+}
