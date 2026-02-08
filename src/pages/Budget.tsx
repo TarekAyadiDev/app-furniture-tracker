@@ -4,7 +4,7 @@ import type { Item, ItemStatus, Option, RoomId } from "@/lib/domain";
 import { formatMoneyUSD } from "@/lib/format";
 import { useData } from "@/data/DataContext";
 
-type Totals = { planned: number; selected: number; spent: number; missingPrice: number; count: number };
+type Totals = { planned: number; selected: number; spent: number; discount: number; missingPrice: number; count: number };
 
 function optionTotalOrNull(opt: Option): number | null {
   const hasAny =
@@ -16,6 +16,19 @@ function optionTotalOrNull(opt: Option): number | null {
   return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
 }
 
+function itemDiscountAmount(item: Item): number | null {
+  const value = typeof item.discountValue === "number" ? item.discountValue : null;
+  if (value === null || value <= 0) return null;
+  if (item.discountType === "amount") return value;
+  if (item.discountType === "percent") {
+    const price = typeof item.price === "number" ? item.price : null;
+    if (price === null) return null;
+    if (value >= 100) return null;
+    return (price * value) / 100;
+  }
+  return null;
+}
+
 function bucketForStatus(status: ItemStatus): keyof Totals | null {
   if (status === "Idea" || status === "Shortlist") return "planned";
   if (status === "Selected") return "selected";
@@ -25,15 +38,19 @@ function bucketForStatus(status: ItemStatus): keyof Totals | null {
 
 function addLine(t: Totals, item: Item, selectedTotals: Map<string, number | null>) {
   t.count += 1;
-  const price = selectedTotals.get(item.id) ?? item.price ?? null;
-  const line = (price || 0) * (item.qty || 1);
-  if (!price) {
+  const itemPrice = typeof item.price === "number" ? item.price : null;
+  const fallbackPrice = selectedTotals.get(item.id) ?? null;
+  const price = itemPrice ?? fallbackPrice;
+  if (price === null) {
     t.missingPrice += 1;
     return;
   }
+  const discount = itemPrice !== null ? itemDiscountAmount(item) : null;
+  if (discount) t.discount += discount * (item.qty || 1);
+  const effective = Math.max(0, price - (discount || 0));
   const b = bucketForStatus(item.status);
   if (!b) return;
-  t[b] += line;
+  t[b] += effective * (item.qty || 1);
 }
 
 export default function Budget() {
@@ -61,14 +78,14 @@ export default function Budget() {
   }, [activeItems, options]);
 
   const totals = useMemo(() => {
-    const t: Totals = { planned: 0, selected: 0, spent: 0, missingPrice: 0, count: 0 };
+    const t: Totals = { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 };
     for (const it of activeItems) addLine(t, it, selectedOptionTotals);
     return t;
   }, [activeItems, selectedOptionTotals]);
 
   const byRoom = useMemo(() => {
     const out = new Map<RoomId, Totals>();
-    for (const r of orderedRoomIds) out.set(r, { planned: 0, selected: 0, spent: 0, missingPrice: 0, count: 0 });
+    for (const r of orderedRoomIds) out.set(r, { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 });
     for (const it of activeItems) {
       const t = out.get(it.room);
       if (t) addLine(t, it, selectedOptionTotals);
@@ -80,7 +97,7 @@ export default function Budget() {
     const out = new Map<string, Totals>();
     for (const it of activeItems) {
       const key = (it.category || "Other").trim() || "Other";
-      if (!out.has(key)) out.set(key, { planned: 0, selected: 0, spent: 0, missingPrice: 0, count: 0 });
+      if (!out.has(key)) out.set(key, { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 });
       addLine(out.get(key)!, it, selectedOptionTotals);
     }
     return [...out.entries()].sort((a, b) => a[0].localeCompare(b[0]));
@@ -106,7 +123,7 @@ export default function Budget() {
           </div>
         </div>
         <p className="mt-4 text-xs text-muted-foreground">
-          {totals.count} item(s) tracked • {totals.missingPrice} need pricing
+          {totals.count} item(s) tracked • {totals.missingPrice} need pricing • Discounts saved {formatMoneyUSD(totals.discount)}
         </p>
       </Card>
 
@@ -137,6 +154,7 @@ export default function Budget() {
                   </div>
                 </div>
                 {t.missingPrice ? <p className="mt-2 text-xs text-muted-foreground">{t.missingPrice} missing price</p> : null}
+                {t.discount ? <p className="mt-1 text-xs text-muted-foreground">Discounts saved {formatMoneyUSD(t.discount)}</p> : null}
               </div>
             );
           })}
@@ -169,6 +187,7 @@ export default function Budget() {
                   </div>
                 </div>
                 {t.missingPrice ? <p className="mt-2 text-xs text-muted-foreground">{t.missingPrice} missing price</p> : null}
+                {t.discount ? <p className="mt-1 text-xs text-muted-foreground">Discounts saved {formatMoneyUSD(t.discount)}</p> : null}
               </div>
             );
           })}

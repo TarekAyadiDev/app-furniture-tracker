@@ -34,6 +34,38 @@ function optionTotalOrNull(opt: Option): number | null {
   return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
 }
 
+function optionPreDiscountTotalOrNull(opt: Option): number | null {
+  const hasAny =
+    typeof opt.price === "number" ||
+    typeof opt.shipping === "number" ||
+    typeof opt.taxEstimate === "number";
+  if (!hasAny) return null;
+  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0);
+}
+
+function itemDiscountAmount(item: Item): number | null {
+  const value = typeof item.discountValue === "number" ? item.discountValue : null;
+  if (value === null || value <= 0) return null;
+  if (item.discountType === "amount") return value;
+  if (item.discountType === "percent") {
+    const price = typeof item.price === "number" ? item.price : null;
+    if (price === null) return null;
+    if (value >= 100) return null;
+    return (price * value) / 100;
+  }
+  return null;
+}
+
+function effectiveItemTotal(item: Item, selected: Option | null): number | null {
+  const price = typeof item.price === "number" ? item.price : null;
+  if (price !== null) {
+    const discount = itemDiscountAmount(item) || 0;
+    return Math.max(0, price - discount);
+  }
+  if (selected) return optionTotalOrNull(selected);
+  return null;
+}
+
 function pickSelectedOption(item: Item, list: Option[]): Option | null {
   if (item.selectedOptionId) {
     const found = list.find((o) => o.id === item.selectedOptionId);
@@ -74,6 +106,15 @@ export default function Items() {
     return `${name} (copy ${idx})`;
   }
 
+  function buildCopyOptionTitle(base: string, list: Option[]) {
+    const title = base.trim() || "Option";
+    const existing = new Set(list.filter((o) => o.syncState !== "deleted").map((o) => o.title));
+    if (!existing.has(`${title} (copy)`)) return `${title} (copy)`;
+    let idx = 2;
+    while (existing.has(`${title} (copy ${idx})`)) idx += 1;
+    return `${title} (copy ${idx})`;
+  }
+
   async function onDuplicateItem(it: Item) {
     if (duplicateItemId) return;
     setDuplicateItemId(it.id);
@@ -86,6 +127,8 @@ export default function Items() {
         category: it.category,
         status: it.status,
         price: it.price ?? null,
+        discountType: it.discountType ?? null,
+        discountValue: it.discountValue ?? null,
         qty: it.qty ?? 1,
         store: it.store ?? null,
         link: it.link ?? null,
@@ -152,6 +195,40 @@ export default function Items() {
     }
   }
 
+  async function onDuplicateOptionForItem(item: Item, option: Option, list: Option[]) {
+    const maxAttachments = 3;
+    try {
+      const titleCopy = buildCopyOptionTitle(option.title, list);
+      const newOptId = await createOption({
+        itemId: item.id,
+        title: titleCopy,
+        store: option.store ?? null,
+        link: option.link ?? null,
+        promoCode: option.promoCode ?? null,
+        price: option.price ?? null,
+        shipping: option.shipping ?? null,
+        taxEstimate: option.taxEstimate ?? null,
+        discount: option.discount ?? null,
+        dimensionsText: option.dimensionsText ?? null,
+        dimensions: option.dimensions ? { ...option.dimensions } : undefined,
+        specs: option.specs ? { ...option.specs } : null,
+        notes: option.notes ?? null,
+        priority: option.priority ?? null,
+        tags: option.tags ? [...option.tags] : null,
+        selected: false,
+      });
+      const optAtts = await listAttachments("option", option.id);
+      await Promise.all(
+        optAtts.slice(0, maxAttachments).map((att) =>
+          addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+        ),
+      );
+      toast({ title: "Option duplicated", description: titleCopy });
+    } catch (err: any) {
+      toast({ title: "Duplicate failed", description: err?.message || "Could not duplicate option." });
+    }
+  }
+
   async function onSelectOptionForItem(item: Item, option: Option, list: Option[]) {
     try {
       const others = list.filter((o) => o.id !== option.id);
@@ -159,14 +236,16 @@ export default function Items() {
         updateOption(option.id, { selected: true }),
         ...others.map((o) => updateOption(o.id, { selected: false })),
       ]);
-      const total = optionTotalOrNull(option);
+      const preDiscountTotal = optionPreDiscountTotalOrNull(option);
       await updateItem(item.id, {
         status: "Selected",
         selectedOptionId: option.id,
         name: option.title || item.name,
         store: option.store ?? null,
         link: option.link ?? null,
-        price: total ?? null,
+        price: preDiscountTotal ?? null,
+        discountType: typeof option.discount === "number" ? "amount" : null,
+        discountValue: typeof option.discount === "number" ? option.discount : null,
         priority: typeof option.priority === "number" ? option.priority : null,
         tags: option.tags ? [...option.tags] : null,
         dimensions: option.dimensions ? { ...option.dimensions } : undefined,
@@ -211,16 +290,25 @@ export default function Items() {
     return map;
   }, [options]);
 
-  const selectedOptionTotals = useMemo(() => {
-    const totals = new Map<string, number | null>();
+  const selectedOptionByItem = useMemo(() => {
+    const selected = new Map<string, Option | null>();
     for (const it of items) {
       if (it.syncState === "deleted") continue;
       const list = optionsByItem.get(it.id) || [];
-      const selected = pickSelectedOption(it, list);
-      totals.set(it.id, selected ? optionTotalOrNull(selected) : null);
+      selected.set(it.id, pickSelectedOption(it, list));
+    }
+    return selected;
+  }, [items, optionsByItem]);
+
+  const effectiveTotals = useMemo(() => {
+    const totals = new Map<string, number | null>();
+    for (const it of items) {
+      if (it.syncState === "deleted") continue;
+      const selected = selectedOptionByItem.get(it.id) || null;
+      totals.set(it.id, effectiveItemTotal(it, selected));
     }
     return totals;
-  }, [items, optionsByItem]);
+  }, [items, selectedOptionByItem]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -234,7 +322,7 @@ export default function Items() {
       .filter((i) => (storeNeedle ? includesText(i.store || "", storeNeedle) : true))
       .filter((i) => {
         if (min === null && max === null) return true;
-        const effective = selectedOptionTotals.get(i.id) ?? i.price ?? null;
+        const effective = effectiveTotals.get(i.id) ?? null;
         if (effective === null) return false;
         if (min !== null && effective < min) return false;
         if (max !== null && effective > max) return false;
@@ -245,7 +333,7 @@ export default function Items() {
         const blob = `${i.name} ${i.category} ${i.store || ""} ${i.notes || ""}`;
         return includesText(blob, needle);
       });
-  }, [items, q, roomFilter, statusFilter, storeFilter, minPrice, maxPrice, selectedOptionTotals]);
+  }, [items, q, roomFilter, statusFilter, storeFilter, minPrice, maxPrice, effectiveTotals]);
 
   const byRoom = useMemo(() => {
     const map = new Map<RoomId, typeof filtered>();
@@ -418,9 +506,8 @@ export default function Items() {
                     <div className="space-y-2">
                       {group.map((it) => {
                         const itemOpts = optionsByItem.get(it.id) || [];
-                        const selectedOpt = pickSelectedOption(it, itemOpts);
-                        const selectedTotal = selectedOpt ? optionTotalOrNull(selectedOpt) : null;
-                        const displayPrice = selectedTotal ?? it.price ?? null;
+                        const selectedOpt = selectedOptionByItem.get(it.id) || pickSelectedOption(it, itemOpts);
+                        const displayPrice = effectiveTotals.get(it.id) ?? null;
                         const openOptions = Boolean(openItemOptions[it.id]);
                         const openOptReorder = Boolean(reorderOptionsForItem[it.id]);
                         const modifiedFields = Array.isArray(it.provenance?.modifiedFields) ? it.provenance.modifiedFields : [];
@@ -462,7 +549,7 @@ export default function Items() {
                                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                     <span className="truncate">{it.category || "Other"}</span>
                                     {it.store ? <span className="truncate">{it.store}</span> : null}
-                                    {displayPrice ? <span>{formatMoneyUSD(displayPrice)}</span> : <span className="italic">no price</span>}
+                                    {displayPrice !== null ? <span>{formatMoneyUSD(displayPrice)}</span> : <span className="italic">no price</span>}
                                     {it.qty !== 1 ? <span>qty {it.qty}</span> : null}
                                     {it.priority ? <span>P{it.priority}</span> : null}
                                     {selectedOpt ? (
@@ -584,17 +671,27 @@ export default function Items() {
                                                 View
                                               </a>
                                             ) : null}
-                                            <Link
-                                              to={`/items/${it.id}?option=${encodeURIComponent(opt.id)}`}
-                                              className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                              onClick={(e) => e.stopPropagation()}
-                                            >
-                                              Edit
-                                            </Link>
-                                          </div>
+                                          <Link
+                                            to={`/items/${it.id}?option=${encodeURIComponent(opt.id)}`}
+                                            className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                            onClick={(e) => e.stopPropagation()}
+                                          >
+                                            Edit
+                                          </Link>
+                                          <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              void onDuplicateOptionForItem(it, opt, itemOpts);
+                                            }}
+                                          >
+                                            Duplicate
+                                          </Button>
                                         </div>
-                                      );
-                                    })}
+                                      </div>
+                                    );
+                                  })}
                                   </div>
                                 )}
 

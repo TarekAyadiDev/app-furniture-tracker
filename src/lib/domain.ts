@@ -75,6 +75,8 @@ export type Item = {
   // Manual ordering within a room (lower comes first).
   sort?: number | null;
   price?: number | null;
+  discountType?: "amount" | "percent" | null;
+  discountValue?: number | null;
   qty: number;
   store?: string | null;
   link?: string | null;

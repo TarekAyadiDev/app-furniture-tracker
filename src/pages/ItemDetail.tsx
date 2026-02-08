@@ -30,6 +30,15 @@ function optionTotalOrNull(o: Option): number | null {
   return (o.price || 0) + (o.shipping || 0) + (o.taxEstimate || 0) - (o.discount || 0);
 }
 
+function optionPreDiscountTotalOrNull(o: Option): number | null {
+  const hasAny =
+    typeof o.price === "number" ||
+    typeof o.shipping === "number" ||
+    typeof o.taxEstimate === "number";
+  if (!hasAny) return null;
+  return (o.price || 0) + (o.shipping || 0) + (o.taxEstimate || 0);
+}
+
 function optionFinalTotal(o: Option) {
   return optionTotalOrNull(o) ?? 0;
 }
@@ -174,6 +183,8 @@ export default function ItemDetail() {
   const [category, setCategory] = useState("Other");
   const [status, setStatus] = useState<ItemStatus>("Idea");
   const [price, setPrice] = useState("");
+  const [discountType, setDiscountType] = useState<"amount" | "percent">("amount");
+  const [discountValue, setDiscountValue] = useState("");
   const [qty, setQty] = useState("1");
   const [store, setStore] = useState("");
   const [link, setLink] = useState("");
@@ -186,6 +197,7 @@ export default function ItemDetail() {
   const [sourceRef, setSourceRef] = useState("");
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus>(null);
   const [openOpt, setOpenOpt] = useState<Record<string, boolean>>({});
+  const [optionOnlyId, setOptionOnlyId] = useState<string | null>(null);
   const [reorderMode, setReorderMode] = useState(false);
   const [newSpecKey, setNewSpecKey] = useState("");
   const [newSpecVal, setNewSpecVal] = useState("");
@@ -223,6 +235,18 @@ export default function ItemDetail() {
     if (!item) return null;
     return item.selectedOptionId || itemOptions.find((o) => o.selected)?.id || null;
   }, [item, itemOptions]);
+
+  const selectedOption = useMemo(() => {
+    if (!selectedOptionId) return null;
+    return itemOptions.find((o) => o.id === selectedOptionId) || null;
+  }, [itemOptions, selectedOptionId]);
+
+  const optionOnlyOption = useMemo(() => {
+    if (!optionOnlyId) return null;
+    return itemOptions.find((o) => o.id === optionOnlyId) || null;
+  }, [itemOptions, optionOnlyId]);
+
+  const optionOnly = Boolean(optionOnlyOption);
 
   const bestOptionId = useMemo(() => pickBestOptionId(filteredOptions), [filteredOptions]);
 
@@ -281,6 +305,8 @@ export default function ItemDetail() {
     setCategory(item.category || "Other");
     setStatus(item.status);
     setPrice(item.price === null || item.price === undefined ? "" : String(item.price));
+    setDiscountType(item.discountType === "percent" ? "percent" : "amount");
+    setDiscountValue(item.discountValue === null || item.discountValue === undefined ? "" : String(item.discountValue));
     setQty(String(item.qty || 1));
     setStore(item.store || "");
     setLink(item.link || "");
@@ -345,6 +371,19 @@ export default function ItemDetail() {
     await updateItem(item.id, patch);
   }
 
+  function computeDiscountAmount(priceValue: number | null, type: "amount" | "percent", value: number | null): number | null {
+    if (value === null || value <= 0) return null;
+    if (type === "amount") return value;
+    if (priceValue === null) return null;
+    if (value >= 100) return null;
+    return (priceValue * value) / 100;
+  }
+
+  const priceValue = parseNumberOrNull(price);
+  const discountValueNum = parseNumberOrNull(discountValue);
+  const effectivePriceValue =
+    priceValue === null ? null : Math.max(0, priceValue - (computeDiscountAmount(priceValue, discountType, discountValueNum) || 0));
+
   async function onSelectStatus(s: ItemStatus) {
     setStatus(s);
     await commit({ status: s });
@@ -371,6 +410,15 @@ export default function ItemDetail() {
     return `${name} (copy ${idx})`;
   }
 
+  function buildCopyOptionTitle(base: string) {
+    const title = base.trim() || "Option";
+    const existing = new Set(itemOptions.filter((o) => o.syncState !== "deleted").map((o) => o.title));
+    if (!existing.has(`${title} (copy)`)) return `${title} (copy)`;
+    let idx = 2;
+    while (existing.has(`${title} (copy ${idx})`)) idx += 1;
+    return `${title} (copy ${idx})`;
+  }
+
   async function onDuplicateItem() {
     if (duplicateBusy) return;
     setDuplicateBusy(true);
@@ -383,6 +431,8 @@ export default function ItemDetail() {
         category: item.category,
         status: item.status,
         price: item.price ?? null,
+        discountType: item.discountType ?? null,
+        discountValue: item.discountValue ?? null,
         qty: item.qty ?? 1,
         store: item.store ?? null,
         link: item.link ?? null,
@@ -454,13 +504,54 @@ export default function ItemDetail() {
     await deleteOption(opt.id);
   }
 
+  async function onDuplicateOption(opt: Option) {
+    const maxAttachments = 3;
+    const titleCopy = buildCopyOptionTitle(opt.title);
+    try {
+      const newOptId = await createOption({
+        itemId: item.id,
+        title: titleCopy,
+        store: opt.store ?? null,
+        link: opt.link ?? null,
+        promoCode: opt.promoCode ?? null,
+        price: opt.price ?? null,
+        shipping: opt.shipping ?? null,
+        taxEstimate: opt.taxEstimate ?? null,
+        discount: opt.discount ?? null,
+        dimensionsText: opt.dimensionsText ?? null,
+        dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
+        specs: opt.specs ? { ...opt.specs } : null,
+        notes: opt.notes ?? null,
+        priority: opt.priority ?? null,
+        tags: opt.tags ? [...opt.tags] : null,
+        selected: false,
+      });
+      const optAtts = optionAttachments[opt.id] || (await listAttachments("option", opt.id));
+      await Promise.all(
+        optAtts.slice(0, maxAttachments).map((att) =>
+          addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+        ),
+      );
+      toast({ title: "Option duplicated", description: titleCopy });
+    } catch (err: any) {
+      toast({ title: "Duplicate failed", description: err?.message || "Could not duplicate option." });
+    }
+  }
+
   async function onShareItem() {
     const roomLabel = roomNameById.get(item.room) || item.room;
+    const shareDiscount = computeDiscountAmount(
+      typeof item.price === "number" ? item.price : null,
+      item.discountType === "percent" ? "percent" : "amount",
+      typeof item.discountValue === "number" ? item.discountValue : null,
+    );
+    const shareTotal =
+      typeof item.price === "number" ? Math.max(0, item.price - (shareDiscount || 0)) : null;
     const parts = [
       item.name,
       roomLabel ? `Room: ${roomLabel}` : "",
       item.status ? `Status: ${item.status}` : "",
-      item.price ? `Price: ${formatMoneyUSD(item.price)}` : "",
+      shareTotal !== null ? `Total: ${formatMoneyUSD(shareTotal)}` : "",
       item.store ? `Store: ${item.store}` : "",
       item.link ? `Link: ${item.link}` : "",
     ].filter(Boolean);
@@ -563,14 +654,16 @@ export default function ItemDetail() {
     ]);
     const chosen = itemOptions.find((o) => o.id === optionId);
     if (chosen) {
-      const final = optionTotalOrNull(chosen);
+      const preDiscount = optionPreDiscountTotalOrNull(chosen);
       const next: Partial<Item> = {
         status: "Selected",
         selectedOptionId: chosen.id,
         name: chosen.title || item.name,
         store: chosen.store ?? null,
         link: chosen.link ?? null,
-        price: final ?? null,
+        price: preDiscount ?? null,
+        discountType: typeof chosen.discount === "number" ? "amount" : null,
+        discountValue: typeof chosen.discount === "number" ? chosen.discount : null,
         priority: typeof chosen.priority === "number" ? chosen.priority : null,
         tags: chosen.tags ? [...chosen.tags] : null,
         dimensions: chosen.dimensions ? { ...chosen.dimensions } : undefined,
@@ -622,7 +715,7 @@ export default function ItemDetail() {
               <StatusBadge status={item.status} />
               <ReviewStatusBadge status={item.provenance?.reviewStatus} />
               <DataSourceBadge dataSource={item.provenance?.dataSource} />
-              {item.price ? <span className="text-sm font-semibold">{formatMoneyUSD(item.price)}</span> : null}
+              {effectivePriceValue !== null ? <span className="text-sm font-semibold">{formatMoneyUSD(effectivePriceValue)}</span> : null}
               {item.store ? <span className="text-sm text-muted-foreground">{item.store}</span> : null}
             </div>
             {itemModifiedFields.length ? (
@@ -841,7 +934,7 @@ export default function ItemDetail() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="item_price">Final price (incl. shipping/tax)</Label>
+              <Label htmlFor="item_price">Price (incl. shipping/tax)</Label>
               <Input
                 id="item_price"
                 inputMode="decimal"
@@ -865,6 +958,76 @@ export default function ItemDetail() {
                 }}
                 className="h-12 text-base"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <Label>Discount</Label>
+                <div className="flex rounded-full border bg-background p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiscountType("amount");
+                      void commit({ discountType: "amount" });
+                    }}
+                    className={[
+                      "rounded-full px-3 py-1 text-xs font-medium",
+                      discountType === "amount" ? "bg-foreground text-background" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    $
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDiscountType("percent");
+                      void commit({ discountType: "percent" });
+                    }}
+                    className={[
+                      "rounded-full px-3 py-1 text-xs font-medium",
+                      discountType === "percent" ? "bg-foreground text-background" : "text-muted-foreground",
+                    ].join(" ")}
+                  >
+                    %
+                  </button>
+                </div>
+              </div>
+              <Input
+                inputMode="decimal"
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                onBlur={() => {
+                  const v = parseNumberOrNull(discountValue);
+                  void commit({ discountType, discountValue: v });
+                }}
+                placeholder={discountType === "percent" ? "%" : "$"}
+                className="h-12 text-base"
+              />
+              {discountValue ? (
+                <div className="text-xs text-muted-foreground">
+                  {(() => {
+                    const priceVal = parseNumberOrNull(price);
+                    const v = parseNumberOrNull(discountValue);
+                    const amt = computeDiscountAmount(priceVal, discountType, v);
+                    return amt ? `Savings: ${formatMoneyUSD(amt)}` : "Savings: —";
+                  })()}
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Effective total</Label>
+              <div className="flex h-12 items-center rounded-md border bg-background px-3 text-sm">
+                {(() => {
+                  const priceVal = parseNumberOrNull(price);
+                  const v = parseNumberOrNull(discountValue);
+                  const amt = computeDiscountAmount(priceVal, discountType, v);
+                  if (priceVal === null) return "—";
+                  return formatMoneyUSD(Math.max(0, priceVal - (amt || 0)));
+                })()}
+              </div>
+              <div className="text-xs text-muted-foreground">Used for budget totals.</div>
             </div>
           </div>
 
@@ -1229,6 +1392,9 @@ export default function ItemDetail() {
                             </Button>
                             <Button variant="secondary" onClick={() => void onShareOption(o)}>
                               Share
+                            </Button>
+                            <Button variant="secondary" onClick={() => void onDuplicateOption(o)}>
+                              Duplicate
                             </Button>
                             <Button
                               variant="secondary"

@@ -153,6 +153,11 @@ function coerceNumberOrNull(input: unknown): number | null {
   return null;
 }
 
+function coerceDiscountType(input: unknown): Item["discountType"] {
+  const t = String(input ?? "").trim();
+  return t === "amount" || t === "percent" ? (t as Item["discountType"]) : null;
+}
+
 function coerceDims(input: unknown): Item["dimensions"] {
   if (!input || typeof input !== "object") return undefined;
   const obj = input as Record<string, unknown>;
@@ -207,6 +212,19 @@ function optionTotalOrNull(opt: Option): number | null {
     typeof opt.discount === "number";
   if (!hasAny) return null;
   return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
+}
+
+function itemDiscountAmount(item: Item): number | null {
+  const value = typeof item.discountValue === "number" ? item.discountValue : null;
+  if (value === null || value <= 0) return null;
+  if (item.discountType === "amount") return value;
+  if (item.discountType === "percent") {
+    const price = typeof item.price === "number" ? item.price : null;
+    if (price === null) return null;
+    if (value >= 100) return null;
+    return (price * value) / 100;
+  }
+  return null;
 }
 
 function dimsFromLegacySpecs(specs: Item["specs"]): Item["dimensions"] | undefined {
@@ -338,6 +356,8 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         selectedOptionId: typeof (it as any)?.selectedOptionId === "string" ? (it as any).selectedOptionId : null,
         sort: coerceSort((it as any)?.sort),
         price: coerceNumberOrNull((it as any)?.price),
+        discountType: coerceDiscountType((it as any)?.discountType),
+        discountValue: coerceNumberOrNull((it as any)?.discountValue),
         qty: qtyRaw !== null && qtyRaw > 0 ? Math.round(qtyRaw) : 1,
         store: typeof (it as any)?.store === "string" ? (it as any).store : null,
         link: typeof (it as any)?.link === "string" ? (it as any).link : null,
@@ -743,6 +763,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         selectedOptionId: typeof partial.selectedOptionId === "string" ? partial.selectedOptionId : null,
         sort,
         price: typeof partial.price === "number" ? partial.price : null,
+        discountType: coerceDiscountType(partial.discountType),
+        discountValue: coerceNumberOrNull(partial.discountValue),
         qty: typeof partial.qty === "number" && partial.qty > 0 ? Math.round(partial.qty) : 1,
         store: typeof partial.store === "string" ? partial.store : null,
         link: typeof partial.link === "string" ? partial.link : null,
@@ -768,6 +790,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!cur) return;
     const ts = nowMs();
     const nextTags = typeof patch.tags === "undefined" ? cur.tags ?? null : coerceTags(patch.tags);
+    const nextDiscountType = typeof patch.discountType === "undefined" ? cur.discountType ?? null : coerceDiscountType(patch.discountType);
+    const nextDiscountValue = typeof patch.discountValue === "undefined" ? cur.discountValue ?? null : coerceNumberOrNull(patch.discountValue);
     const next: Item = {
       ...cur,
       ...patch,
@@ -776,6 +800,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       category: typeof patch.category === "string" ? patch.category : cur.category,
       name: typeof patch.name === "string" ? patch.name : cur.name,
       tags: nextTags,
+      discountType: nextDiscountType,
+      discountValue: nextDiscountValue,
       updatedAt: ts,
       syncState: patch.syncState ?? "dirty",
       provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
@@ -827,6 +853,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const sort = minSort - 1;
     const ts = nowMs();
     const optionId = newId("o");
+    const itemDiscount = itemDiscountAmount(source);
     const option: Option = {
       id: optionId,
       remoteId: null,
@@ -837,6 +864,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       store: source.store ?? null,
       link: source.link ?? null,
       price: source.price ?? null,
+      discount: itemDiscount ?? null,
       notes: mergedNotes,
       priority: source.priority ?? null,
       tags: coerceTags(source.tags),
