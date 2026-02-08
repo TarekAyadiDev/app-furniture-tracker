@@ -16,7 +16,7 @@ import { computeItemFitWarnings } from "@/lib/fit";
 import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provenance";
 import { useToast } from "@/hooks/use-toast";
 import { shareData } from "@/lib/share";
-import { addAttachment, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
+import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 
 function optionFinalTotal(o: Option) {
   return (o.price || 0) + (o.shipping || 0) + (o.taxEstimate || 0) - (o.discount || 0);
@@ -71,6 +71,7 @@ export default function ItemDetail() {
     options,
     reorderOptions,
     renameCategory,
+    createItem,
     updateItem,
     deleteItem,
     createOption,
@@ -117,6 +118,7 @@ export default function ItemDetail() {
   const [reorderMode, setReorderMode] = useState(false);
   const [newSpecKey, setNewSpecKey] = useState("");
   const [newSpecVal, setNewSpecVal] = useState("");
+  const [duplicateBusy, setDuplicateBusy] = useState(false);
 
   const roomMeasurements = useMemo(() => {
     return measurements.filter((m) => m.syncState !== "deleted" && m.room === item?.room);
@@ -186,20 +188,6 @@ export default function ItemDetail() {
     };
   }, [itemOptions]);
 
-  if (!id) return null;
-  if (!item) {
-    return (
-      <Card className="p-4">
-        <div className="space-y-2">
-          <div className="text-base font-semibold">Item not found</div>
-          <Button variant="secondary" onClick={() => nav("/items")}>
-            Back to Items
-          </Button>
-        </div>
-      </Card>
-    );
-  }
-
   async function commit(patch: Partial<Item>) {
     await updateItem(item.id, patch);
   }
@@ -219,6 +207,87 @@ export default function ItemDetail() {
     }
     await deleteItem(item.id);
     nav("/items");
+  }
+
+  function buildCopyName(base: string) {
+    const name = base.trim() || "New item";
+    const existing = new Set(items.filter((i) => i.syncState !== "deleted").map((i) => i.name));
+    if (!existing.has(`${name} (copy)`)) return `${name} (copy)`;
+    let idx = 2;
+    while (existing.has(`${name} (copy ${idx})`)) idx += 1;
+    return `${name} (copy ${idx})`;
+  }
+
+  async function onDuplicateItem() {
+    if (duplicateBusy) return;
+    setDuplicateBusy(true);
+    const maxAttachments = 3;
+    try {
+      const copyName = buildCopyName(item.name);
+      const newId = await createItem({
+        name: copyName,
+        room: item.room,
+        category: item.category,
+        status: item.status,
+        price: item.price ?? null,
+        qty: item.qty ?? 1,
+        store: item.store ?? null,
+        link: item.link ?? null,
+        notes: item.notes ?? null,
+        priority: item.priority ?? null,
+        dimensions: item.dimensions ? { ...item.dimensions } : undefined,
+        specs: item.specs ? { ...item.specs } : null,
+      });
+
+      const itemAtts = itemAttachments.length ? itemAttachments : await listAttachments("item", item.id);
+      await Promise.all(
+        itemAtts.slice(0, maxAttachments).map((att) =>
+          addAttachmentFromBlob("item", newId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+        ),
+      );
+
+      const sortedOptions = itemOptions
+        .slice()
+        .sort((a, b) => {
+          const sa = typeof a.sort === "number" ? a.sort : 999999;
+          const sb = typeof b.sort === "number" ? b.sort : 999999;
+          if (sa !== sb) return sa - sb;
+          return a.title.localeCompare(b.title);
+        });
+      const optionIdMap = new Map<string, string>();
+      for (const opt of [...sortedOptions].reverse()) {
+        const newOptId = await createOption({
+          itemId: newId,
+          title: opt.title,
+          store: opt.store ?? null,
+          link: opt.link ?? null,
+          promoCode: opt.promoCode ?? null,
+          price: opt.price ?? null,
+          shipping: opt.shipping ?? null,
+          taxEstimate: opt.taxEstimate ?? null,
+          discount: opt.discount ?? null,
+          dimensionsText: opt.dimensionsText ?? null,
+          notes: opt.notes ?? null,
+          selected: Boolean(opt.selected),
+        });
+        optionIdMap.set(opt.id, newOptId);
+      }
+      for (const [oldId, newOptId] of optionIdMap.entries()) {
+        const optAtts = optionAttachments[oldId] || (await listAttachments("option", oldId));
+        await Promise.all(
+          optAtts.slice(0, maxAttachments).map((att) =>
+            addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+          ),
+        );
+      }
+
+      toast({ title: "Item duplicated", description: copyName });
+      nav(`/items/${newId}`);
+    } catch (err: any) {
+      toast({ title: "Duplicate failed", description: err?.message || "Could not duplicate item." });
+    } finally {
+      setDuplicateBusy(false);
+    }
   }
 
   async function onDeleteOption(opt: Option) {
@@ -299,8 +368,12 @@ export default function ItemDetail() {
       toast({ title: "Unsupported file", description: "Please choose an image file." });
       return;
     }
-    await Promise.all(incoming.map((file) => addAttachment(parentType, parentId, file)));
-    await refreshAttachments(parentType, parentId);
+    try {
+      await Promise.all(incoming.map((file) => addAttachment(parentType, parentId, file)));
+      await refreshAttachments(parentType, parentId);
+    } catch (err: any) {
+      toast({ title: "Photo upload failed", description: err?.message || "Could not upload photo." });
+    }
   }
 
   async function handleRemoveAttachment(parentType: "item" | "option", parentId: string, attachmentId: string) {
@@ -341,7 +414,21 @@ export default function ItemDetail() {
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
   }, [itemOptions, loc.pathname, nav, optionToOpen]);
 
-  const itemModifiedFields = Array.isArray(item.provenance?.modifiedFields) ? item.provenance.modifiedFields : [];
+  const itemModifiedFields = Array.isArray(item?.provenance?.modifiedFields) ? item?.provenance?.modifiedFields : [];
+
+  if (!id) return null;
+  if (!item) {
+    return (
+      <Card className="p-4">
+        <div className="space-y-2">
+          <div className="text-base font-semibold">Item not found</div>
+          <Button variant="secondary" onClick={() => nav("/items")}>
+            Back to Items
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -367,6 +454,9 @@ export default function ItemDetail() {
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
             <Button variant="secondary" onClick={() => void onShareItem()}>
               Share
+            </Button>
+            <Button variant="secondary" onClick={() => void onDuplicateItem()} disabled={duplicateBusy}>
+              Duplicate
             </Button>
             <Button variant="destructive" onClick={() => void onDeleteItem()}>
               Delete
@@ -744,7 +834,7 @@ export default function ItemDetail() {
                         }}
                         aria-label={`Remove spec ${k}`}
                       >
-                        \u00d7
+                        &times;
                       </Button>
                     </div>
                   ))
@@ -1096,12 +1186,19 @@ function AttachmentGallery({
 
   useEffect(() => {
     const next: Record<string, string> = {};
+    const toRevoke: string[] = [];
     for (const att of attachments) {
-      next[att.id] = URL.createObjectURL(att.blob);
+      if (att.sourceUrl) {
+        next[att.id] = att.sourceUrl;
+        continue;
+      }
+      const url = URL.createObjectURL(att.blob);
+      next[att.id] = url;
+      toRevoke.push(url);
     }
     setUrls(next);
     return () => {
-      Object.values(next).forEach((url) => URL.revokeObjectURL(url));
+      toRevoke.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [attachments]);
 
@@ -1145,7 +1242,7 @@ function AttachmentGallery({
                 className="absolute right-1 top-1 rounded-full border bg-background px-1.5 text-xs text-muted-foreground hover:text-foreground"
                 aria-label="Remove photo"
               >
-                \u00d7
+                &times;
               </button>
             </div>
           ))}

@@ -38,6 +38,26 @@ function dimsToText(d: any) {
   return `${parts.join("x")} in`;
 }
 
+function sanitizeAttachments(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const att of raw) {
+    if (!att || typeof att !== "object") continue;
+    const url = typeof att.url === "string" ? att.url.trim() : "";
+    if (!url) continue;
+    out.push({
+      id: typeof att.id === "string" ? att.id : null,
+      url,
+      name: typeof att.name === "string" ? att.name : null,
+      mime: typeof att.mime === "string" ? att.mime : null,
+      size: typeof att.size === "number" ? att.size : null,
+      createdAt: typeof att.createdAt === "number" ? att.createdAt : Date.now(),
+      updatedAt: typeof att.updatedAt === "number" ? att.updatedAt : Date.now(),
+    });
+  }
+  return out;
+}
+
 export default async function handler(req: any, res: any) {
   if (req.method !== "POST") {
     res.statusCode = 405;
@@ -87,6 +107,7 @@ export default async function handler(req: any, res: any) {
         dimensions: it.dimensions || null,
         sort: typeof it.sort === "number" ? it.sort : null,
         specs: it.specs || null,
+        attachments: sanitizeAttachments(it.attachments),
         createdAt: typeof it.createdAt === "number" ? it.createdAt : Date.now(),
         updatedAt: typeof it.updatedAt === "number" ? it.updatedAt : Date.now(),
       };
@@ -242,6 +263,7 @@ export default async function handler(req: any, res: any) {
       const meta = {
         selected: Boolean(o.selected),
         sort: typeof o.sort === "number" ? o.sort : null,
+        attachments: sanitizeAttachments(o.attachments),
         createdAt: typeof o.createdAt === "number" ? o.createdAt : Date.now(),
         updatedAt: typeof o.updatedAt === "number" ? o.updatedAt : Date.now(),
       };

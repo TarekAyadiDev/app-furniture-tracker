@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import healthHandler from "./api/health";
+import s3SignHandler from "./api/s3/sign";
 import pullHandler from "./api/sync/pull";
 import pushHandler from "./api/sync/push";
 
@@ -12,26 +13,41 @@ function localApiPlugin(): Plugin {
   return {
     name: "local-api",
     configureServer(server) {
-      server.middlewares.use("/api/health", (req, res) => {
-        void Promise.resolve(healthHandler(req, res)).catch((err: any) => {
-          res.statusCode = 500;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ ok: false, airtableConfigured: false, message: err?.message || "Health failed" }));
-        });
-      });
-      server.middlewares.use("/api/sync/pull", (req, res) => {
-        void Promise.resolve(pullHandler(req, res)).catch((err: any) => {
-          res.statusCode = 500;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ ok: false, message: err?.message || "Sync pull failed" }));
-        });
-      });
-      server.middlewares.use("/api/sync/push", (req, res) => {
-        void Promise.resolve(pushHandler(req, res)).catch((err: any) => {
-          res.statusCode = 500;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ ok: false, message: err?.message || "Sync push failed" }));
-        });
+      server.middlewares.use("/api", (req, res, next) => {
+        const url = req.url || "";
+        if (url.startsWith("/health")) {
+          void Promise.resolve(healthHandler(req, res)).catch((err: any) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, airtableConfigured: false, message: err?.message || "Health failed" }));
+          });
+          return;
+        }
+        if (url.startsWith("/s3/sign")) {
+          void Promise.resolve(s3SignHandler(req, res)).catch((err: any) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, message: err?.message || "S3 sign failed" }));
+          });
+          return;
+        }
+        if (url.startsWith("/sync/pull")) {
+          void Promise.resolve(pullHandler(req, res)).catch((err: any) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, message: err?.message || "Sync pull failed" }));
+          });
+          return;
+        }
+        if (url.startsWith("/sync/push")) {
+          void Promise.resolve(pushHandler(req, res)).catch((err: any) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, message: err?.message || "Sync push failed" }));
+          });
+          return;
+        }
+        next();
       });
     },
   };

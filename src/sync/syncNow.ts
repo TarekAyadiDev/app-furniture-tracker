@@ -1,6 +1,18 @@
 import type { ExportBundleV1, Item, Measurement, Option, Room } from "@/lib/domain";
-import { idbDelete, idbGet, idbGetSnapshot, idbPut, idbSetMeta } from "@/storage/idb";
+import { newId } from "@/lib/id";
+import { idbDelete, idbGet, idbGetAll, idbGetAllByIndex, idbGetSnapshot, idbPut, idbSetMeta } from "@/storage/idb";
 import { notifyDbChanged } from "@/storage/notify";
+import { rekeyAttachmentParent, type AttachmentRecord } from "@/storage/attachments";
+
+type AttachmentMeta = {
+  id: string;
+  url: string;
+  name: string | null;
+  mime: string | null;
+  size: number | null;
+  createdAt: number;
+  updatedAt: number;
+};
 
 type PushResponse = {
   ok: boolean;
@@ -19,6 +31,52 @@ type PushMode = "commit" | "reset";
 
 function isRecordId(id: string) {
   return id.startsWith("rec");
+}
+
+function attachmentParentKey(parentType: "item" | "option", parentId: string) {
+  return `${parentType}:${parentId}`;
+}
+
+function parseAttachmentMeta(raw: any): AttachmentMeta | null {
+  if (!raw || typeof raw !== "object") return null;
+  const url = typeof raw.url === "string" ? raw.url.trim() : "";
+  if (!url) return null;
+  return {
+    id: typeof raw.id === "string" && raw.id ? raw.id : newId("att"),
+    url,
+    name: typeof raw.name === "string" ? raw.name : null,
+    mime: typeof raw.mime === "string" ? raw.mime : null,
+    size: typeof raw.size === "number" ? raw.size : null,
+    createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
+  };
+}
+
+async function replaceAttachmentsForParent(
+  parentType: "item" | "option",
+  parentId: string,
+  metas: AttachmentMeta[],
+) {
+  const existing = await idbGetAllByIndex<AttachmentRecord>("attachments", "parentKey", attachmentParentKey(parentType, parentId));
+  const nextIds = new Set(metas.map((m) => m.id));
+  for (const att of existing) {
+    if (!nextIds.has(att.id)) await idbDelete("attachments", att.id);
+  }
+  for (const meta of metas) {
+    await idbPut("attachments", {
+      id: meta.id,
+      parentType,
+      parentId,
+      parentKey: attachmentParentKey(parentType, parentId),
+      name: meta.name,
+      sourceUrl: meta.url,
+      mime: meta.mime,
+      size: meta.size,
+      blob: new Blob([], { type: meta.mime || "" }),
+      createdAt: meta.createdAt,
+      updatedAt: meta.updatedAt,
+    } as AttachmentRecord);
+  }
 }
 
 async function readJsonOrText<T>(res: Response): Promise<{ json: T | null; text: string }> {
@@ -55,6 +113,7 @@ async function rekeyItem(localId: string, remoteId: string) {
       await idbPut("options", { ...o, itemId: remoteId, syncState: o.syncState || "dirty" });
     }
   }
+  await rekeyAttachmentParent("item", localId, remoteId);
 }
 
 async function rekeyOption(localId: string, remoteId: string) {
@@ -63,6 +122,7 @@ async function rekeyOption(localId: string, remoteId: string) {
   const next: Option = { ...opt, id: remoteId, remoteId, syncState: "clean" };
   await idbPut("options", next);
   await idbDelete("options", localId);
+  await rekeyAttachmentParent("option", localId, remoteId);
 }
 
 async function rekeyMeasurement(localId: string, remoteId: string) {
@@ -85,12 +145,22 @@ async function applyPulledBundle(bundle: ExportBundleV1) {
     await idbPut("measurements", meas);
   }
   for (const it of bundle.items || []) {
-    const item: Item = { ...it, syncState: "clean", remoteId: it.remoteId || it.id || null };
+    const anyItem = it as any;
+    const attachments = Array.isArray(anyItem.attachments) ? anyItem.attachments : [];
+    const { attachments: _ignoredItemAttachments, ...itemRest } = anyItem;
+    const item: Item = { ...itemRest, syncState: "clean", remoteId: anyItem.remoteId || anyItem.id || null };
     await idbPut("items", item);
+    const metas = attachments.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
+    await replaceAttachmentsForParent("item", item.id, metas);
   }
   for (const o of bundle.options || []) {
-    const opt: Option = { ...o, syncState: "clean", remoteId: o.remoteId || o.id || null };
+    const anyOpt = o as any;
+    const attachments = Array.isArray(anyOpt.attachments) ? anyOpt.attachments : [];
+    const { attachments: _ignoredOptAttachments, ...optRest } = anyOpt;
+    const opt: Option = { ...optRest, syncState: "clean", remoteId: anyOpt.remoteId || anyOpt.id || null };
     await idbPut("options", opt);
+    const metas = attachments.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
+    await replaceAttachmentsForParent("option", opt.id, metas);
   }
 }
 
@@ -106,10 +176,37 @@ export async function syncNow() {
 
 async function pushChanges(mode: PushMode = "commit") {
   const snap = await idbGetSnapshot();
+  const allAttachments = await idbGetAll<AttachmentRecord>("attachments");
+  const attachmentByParentKey = new Map<string, AttachmentMeta[]>();
+  for (const att of allAttachments) {
+    if (!att.sourceUrl) continue;
+    const entry: AttachmentMeta = {
+      id: att.id,
+      url: att.sourceUrl,
+      name: att.name ?? null,
+      mime: att.mime ?? null,
+      size: typeof att.size === "number" ? att.size : null,
+      createdAt: typeof att.createdAt === "number" ? att.createdAt : Date.now(),
+      updatedAt: typeof att.updatedAt === "number" ? att.updatedAt : Date.now(),
+    };
+    const key = `${att.parentType}:${att.parentId}`;
+    if (!attachmentByParentKey.has(key)) attachmentByParentKey.set(key, []);
+    attachmentByParentKey.get(key)!.push(entry);
+  }
   const dirty = {
     // Treat missing syncState as dirty so imported/example data can be pushed on first sync.
-    items: snap.items.filter((x) => x.syncState !== "clean"),
-    options: snap.options.filter((x) => x.syncState !== "clean"),
+    items: snap.items
+      .filter((x) => x.syncState !== "clean")
+      .map((it) => ({
+        ...it,
+        attachments: attachmentByParentKey.get(`item:${it.id}`) || [],
+      })),
+    options: snap.options
+      .filter((x) => x.syncState !== "clean")
+      .map((o) => ({
+        ...o,
+        attachments: attachmentByParentKey.get(`option:${o.id}`) || [],
+      })),
     measurements: snap.measurements.filter((x) => x.syncState !== "clean"),
     rooms: snap.rooms.filter((x) => x.syncState !== "clean"),
   };

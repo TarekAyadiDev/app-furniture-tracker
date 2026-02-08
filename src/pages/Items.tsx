@@ -10,10 +10,10 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, type ItemStatus, type RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, type Item, type ItemStatus, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
-import { addAttachmentFromUrl, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
+import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 
 type RoomFilter = RoomId | "All";
 type StatusFilter = ItemStatus | "All";
@@ -24,7 +24,8 @@ function includesText(haystack: string, needle: string) {
 
 export default function Items() {
   const nav = useNavigate();
-  const { orderedRooms, roomNameById, items, options, reorderRooms, reorderItems } = useData();
+  const { toast } = useToast();
+  const { orderedRooms, roomNameById, items, options, reorderRooms, reorderItems, createItem, createOption } = useData();
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -37,8 +38,91 @@ export default function Items() {
 
   const [reorderRoomsMode, setReorderRoomsMode] = useState(false);
   const [reorderRoomId, setReorderRoomId] = useState<RoomId | null>(null);
+  const [duplicateItemId, setDuplicateItemId] = useState<string | null>(null);
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
+
+  function buildCopyName(base: string) {
+    const name = base.trim() || "New item";
+    const existing = new Set(items.filter((i) => i.syncState !== "deleted").map((i) => i.name));
+    if (!existing.has(`${name} (copy)`)) return `${name} (copy)`;
+    let idx = 2;
+    while (existing.has(`${name} (copy ${idx})`)) idx += 1;
+    return `${name} (copy ${idx})`;
+  }
+
+  async function onDuplicateItem(it: Item) {
+    if (duplicateItemId) return;
+    setDuplicateItemId(it.id);
+    const maxAttachments = 3;
+    try {
+      const copyName = buildCopyName(it.name);
+      const newId = await createItem({
+        name: copyName,
+        room: it.room,
+        category: it.category,
+        status: it.status,
+        price: it.price ?? null,
+        qty: it.qty ?? 1,
+        store: it.store ?? null,
+        link: it.link ?? null,
+        notes: it.notes ?? null,
+        priority: it.priority ?? null,
+        dimensions: it.dimensions ? { ...it.dimensions } : undefined,
+        specs: it.specs ? { ...it.specs } : null,
+      });
+
+      const itemAtts = await listAttachments("item", it.id);
+      await Promise.all(
+        itemAtts.slice(0, maxAttachments).map((att) =>
+          addAttachmentFromBlob("item", newId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+        ),
+      );
+
+      const itemOptions = options.filter((o) => o.syncState !== "deleted" && o.itemId === it.id);
+      const sortedOptions = itemOptions
+        .slice()
+        .sort((a, b) => {
+          const sa = typeof a.sort === "number" ? a.sort : 999999;
+          const sb = typeof b.sort === "number" ? b.sort : 999999;
+          if (sa !== sb) return sa - sb;
+          return a.title.localeCompare(b.title);
+        });
+      const optionIdMap = new Map<string, string>();
+      for (const opt of [...sortedOptions].reverse()) {
+        const newOptId = await createOption({
+          itemId: newId,
+          title: opt.title,
+          store: opt.store ?? null,
+          link: opt.link ?? null,
+          promoCode: opt.promoCode ?? null,
+          price: opt.price ?? null,
+          shipping: opt.shipping ?? null,
+          taxEstimate: opt.taxEstimate ?? null,
+          discount: opt.discount ?? null,
+          dimensionsText: opt.dimensionsText ?? null,
+          notes: opt.notes ?? null,
+          selected: Boolean(opt.selected),
+        });
+        optionIdMap.set(opt.id, newOptId);
+      }
+      for (const [oldId, newOptId] of optionIdMap.entries()) {
+        const optAtts = await listAttachments("option", oldId);
+        await Promise.all(
+          optAtts.slice(0, maxAttachments).map((att) =>
+            addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+          ),
+        );
+      }
+
+      toast({ title: "Item duplicated", description: copyName });
+      nav(`/items/${newId}`);
+    } catch (err: any) {
+      toast({ title: "Duplicate failed", description: err?.message || "Could not duplicate item." });
+    } finally {
+      setDuplicateItemId(null);
+    }
+  }
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -275,10 +359,21 @@ export default function Items() {
                             <div className="flex items-start gap-3">
                               <ItemPhotoStrip itemId={it.id} />
                               <div className="min-w-0 flex-1">
-                                <button
-                                  type="button"
+                                <div
+                                  role="button"
+                                  tabIndex={0}
                                   className="w-full min-w-0 text-left"
-                                  onClick={() => nav(`/items/${it.id}`)}
+                                  onClick={(e) => {
+                                    const target = e.target as HTMLElement | null;
+                                    if (target?.closest("a,button")) return;
+                                    nav(`/items/${it.id}`);
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                      e.preventDefault();
+                                      nav(`/items/${it.id}`);
+                                    }
+                                  }}
                                 >
                                   <div className="flex items-center justify-between gap-2">
                                     <div className="truncate text-base font-semibold">{it.name}</div>
@@ -310,15 +405,29 @@ export default function Items() {
                                       <span>{opt.count} option(s)</span>
                                     ) : null}
                                   </div>
-                                </button>
+                                </div>
                               </div>
 
-                              <Link
-                                to={`/items/${it.id}`}
-                                className="shrink-0 rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
-                              >
-                                Edit
-                              </Link>
+                              <div className="flex shrink-0 flex-col gap-2">
+                                <Link
+                                  to={`/items/${it.id}`}
+                                  className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+                                >
+                                  Edit
+                                </Link>
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={duplicateItemId === it.id}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    void onDuplicateItem(it);
+                                  }}
+                                >
+                                  Duplicate
+                                </Button>
+                              </div>
                             </div>
                           </Card>
                         );
@@ -378,6 +487,7 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const max = 3;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -395,10 +505,19 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
 
   useEffect(() => {
     const next: Record<string, string> = {};
-    for (const att of attachments) next[att.id] = URL.createObjectURL(att.blob);
+    const toRevoke: string[] = [];
+    for (const att of attachments) {
+      if (att.sourceUrl) {
+        next[att.id] = att.sourceUrl;
+        continue;
+      }
+      const url = URL.createObjectURL(att.blob);
+      next[att.id] = url;
+      toRevoke.push(url);
+    }
     setUrls(next);
     return () => {
-      Object.values(next).forEach((url) => URL.revokeObjectURL(url));
+      toRevoke.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [attachments]);
 
@@ -407,19 +526,24 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
     setAttachments((cur) => cur.filter((att) => att.id !== attId));
   }
 
-  async function onAddFromUrl() {
+  async function onAddFromFiles(files: FileList | null) {
+    if (!files || !files.length) return;
     if (attachments.length >= max) {
       toast({ title: "Limit reached", description: "Up to 3 photos per item." });
       return;
     }
-    const raw = prompt("Photo URL (image link):")?.trim();
-    if (!raw) return;
+    const remaining = Math.max(0, max - attachments.length);
+    const incoming = Array.from(files).slice(0, remaining);
+    if (!incoming.length) return;
+    if (incoming.length < files.length) {
+      toast({ title: "Limit reached", description: `Only added ${incoming.length} photo(s).` });
+    }
     try {
-      await addAttachmentFromUrl("item", itemId, raw);
+      await Promise.all(incoming.map((file) => addAttachment("item", itemId, file)));
       const rows = await listAttachments("item", itemId);
       setAttachments(rows);
     } catch (err: any) {
-      toast({ title: "Photo failed", description: err?.message || "Could not fetch that image." });
+      toast({ title: "Photo upload failed", description: err?.message || "Could not upload photo." });
     }
   }
 
@@ -444,7 +568,7 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
                 className="absolute right-0.5 top-0.5 rounded-full border bg-background px-1 text-[10px] text-muted-foreground hover:text-foreground"
                 aria-label="Remove photo"
               >
-                \u00d7
+                &times;
               </button>
             </div>
           ))}
@@ -452,7 +576,24 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
       ) : (
         <div className="text-[11px] text-muted-foreground">No photos</div>
       )}
-      <Button type="button" size="sm" variant="secondary" className="h-7 px-2 text-[11px]" onClick={() => void onAddFromUrl()}>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          void onAddFromFiles(e.target.files);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }}
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        className="h-7 px-2 text-[11px]"
+        onClick={() => fileInputRef.current?.click()}
+      >
         Add photo
       </Button>
     </div>

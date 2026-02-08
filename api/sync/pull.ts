@@ -85,6 +85,7 @@ export default async function handler(req: any, res: any) {
           priority: toNumber(f["Priority"] ?? f["Prioirity"]),
           dimensions: dims || undefined,
           specs: meta?.specs && typeof meta.specs === "object" ? meta.specs : null,
+          attachments: Array.isArray(meta?.attachments) ? meta.attachments : [],
           createdAt: toNumber(meta?.createdAt) || Date.now(),
           updatedAt: toNumber(meta?.updatedAt) || Date.now(),
         });
@@ -110,6 +111,7 @@ export default async function handler(req: any, res: any) {
           dimensionsText: typeof f["Dimensions"] === "string" ? f["Dimensions"] : null,
           notes: userNotes || null,
           selected: Boolean(meta?.selected),
+          attachments: Array.isArray(meta?.attachments) ? meta.attachments : [],
           createdAt: toNumber(meta?.createdAt) || Date.now(),
           updatedAt: toNumber(meta?.updatedAt) || Date.now(),
         });
