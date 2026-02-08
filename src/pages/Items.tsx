@@ -409,15 +409,27 @@ export default function Items() {
                               </div>
 
                               <div className="flex shrink-0 flex-col gap-2">
+                                {it.link && (
+                                  <a
+                                    href={it.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    View Offer
+                                  </a>
+                                )}
                                 <Link
                                   to={`/items/${it.id}`}
-                                  className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+                                  className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 >
                                   Edit
                                 </Link>
                                 <Button
                                   size="sm"
                                   variant="secondary"
+                                  className="h-8 rounded-lg text-xs"
                                   disabled={duplicateItemId === it.id}
                                   onClick={(e) => {
                                     e.preventDefault();
@@ -550,31 +562,60 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
   return (
     <div className="w-[120px] shrink-0 space-y-2">
       {attachments.length ? (
-        <div className="flex flex-wrap gap-2">
-          {attachments.slice(0, max).map((att) => (
-            <div key={att.id} className="relative h-12 w-12 overflow-hidden rounded-md border bg-background">
-              {urls[att.id] ? (
-                <img src={urls[att.id]} alt={att.name || "Item photo"} className="h-full w-full object-cover" />
+        <div className="flex flex-col gap-2">
+          {/* Main large image */}
+          {attachments[0] && (
+            <div className="relative aspect-square w-full overflow-hidden rounded-lg border bg-background shadow-sm transition-all hover:scale-[1.02]">
+              {urls[attachments[0].id] ? (
+                <img src={urls[attachments[0].id]} alt={attachments[0].name || "Item photo"} className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center text-[10px] text-muted-foreground">...</div>
+                <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">Loading...</div>
               )}
               <button
                 type="button"
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  void onRemove(att.id);
+                  void onRemove(attachments[0].id);
                 }}
-                className="absolute right-0.5 top-0.5 rounded-full border bg-background px-1 text-[10px] text-muted-foreground hover:text-foreground"
+                className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/80 text-xs text-foreground backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
                 aria-label="Remove photo"
               >
                 &times;
               </button>
             </div>
-          ))}
+          )}
+          {/* Smaller thumbnails for others */}
+          {attachments.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {attachments.slice(1, max).map((att) => (
+                <div key={att.id} className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-background shadow-sm">
+                  {urls[att.id] ? (
+                    <img src={urls[att.id]} alt={att.name || "Item photo"} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[8px] text-muted-foreground">...</div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      void onRemove(att.id);
+                    }}
+                    className="absolute right-0.5 top-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-background/80 text-[8px] text-foreground hover:bg-destructive hover:text-destructive-foreground"
+                    aria-label="Remove photo"
+                  >
+                    &times;
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
-        <div className="text-[11px] text-muted-foreground">No photos</div>
+        <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-xs text-muted-foreground">
+          <span>No photo</span>
+        </div>
       )}
       <input
         ref={fileInputRef}

@@ -77,6 +77,10 @@ export default async function handler(req: any, res: any) {
 
     const { token, baseId, tableId, view } = getAirtableConfig();
     const PRIORITY_FIELD = process.env.AIRTABLE_PRIORITY_FIELD || "Priority";
+    const SYNC_SOURCE = process.env.AIRTABLE_SYNC_SOURCE || "app";
+    const SYNC_SOURCE_FIELD = process.env.AIRTABLE_SYNC_SOURCE_FIELD || "Last Sync Source";
+    const SYNC_AT_FIELD = process.env.AIRTABLE_SYNC_AT_FIELD || "Last Sync At";
+    const syncAtIso = new Date().toISOString();
 
     if (forceCreate) {
       const existing = await listAllRecords({ token, baseId, tableId, view });
@@ -124,6 +128,8 @@ export default async function handler(req: any, res: any) {
         Notes: buildNotes(it.notes, meta),
         Dimensions: dimsToText(it.dimensions),
       };
+      fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
+      fields[SYNC_AT_FIELD] = syncAtIso;
       if (typeof it.priority === "number") fields[PRIORITY_FIELD] = Math.round(it.priority);
 
       if (remoteId) itemUpdates.push({ id: remoteId, fields });
@@ -177,6 +183,8 @@ export default async function handler(req: any, res: any) {
         Confidence: m.confidence || null,
         Notes: buildNotes(m.notes, meta),
       };
+      fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
+      fields[SYNC_AT_FIELD] = syncAtIso;
       if (remoteId) measUpdates.push({ id: remoteId, fields });
       else {
         measCreates.push({ fields });
@@ -215,6 +223,8 @@ export default async function handler(req: any, res: any) {
         Room: rid,
         Notes: buildNotes(r.notes || "", meta),
       };
+      fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
+      fields[SYNC_AT_FIELD] = syncAtIso;
       if (remoteId) roomUpdates.push({ id: remoteId, fields });
       else {
         roomCreates.push({ fields });
@@ -283,6 +293,8 @@ export default async function handler(req: any, res: any) {
         Dimensions: typeof o.dimensionsText === "string" ? o.dimensionsText : null,
         Notes: buildNotes(o.notes, meta),
       };
+      fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
+      fields[SYNC_AT_FIELD] = syncAtIso;
 
       if (remoteId) {
         optUpdates.push({ id: remoteId, fields });

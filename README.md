@@ -44,6 +44,9 @@ npm run preview
    - `AIRTABLE_TABLE_ID`
    - Optional: `AIRTABLE_VIEW_NAME` (limit sync to a view)
    - Optional: `AIRTABLE_PRIORITY_FIELD` (defaults to `Prioirity`)
+   - Optional: `AIRTABLE_SYNC_SOURCE` (stamp records on push)
+   - Optional: `AIRTABLE_SYNC_SOURCE_FIELD` (defaults to `Last Sync Source`)
+   - Optional: `AIRTABLE_SYNC_AT_FIELD` (defaults to `Last Sync At`)
 4) Deploy.
 
 The frontend calls `/api/*`; the backend talks to Airtable with env vars only.
@@ -94,6 +97,10 @@ Notes:
 - For room notes, the server writes `Record Type=Note` records keyed by `Room`.
 
 Note: To avoid requiring extra columns, some item metadata (like `category` and exact dimension structure) is stored inside `Notes` in a hidden `app_meta` block.
+
+Optional sync audit columns (for tagging where the last change came from):
+- `Last Sync Source` (text)
+- `Last Sync At` (text, ISO timestamp)
 
 ## Import / export
 

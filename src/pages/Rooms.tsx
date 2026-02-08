@@ -123,11 +123,11 @@ export default function Rooms() {
                 <p className="mt-1 text-xs text-muted-foreground">{list.length} measurement(s)</p>
                 {preview ? <p className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">{preview}</p> : null}
                 {top.length ? (
-                  <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                  <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {top.map((m) => (
-                      <div key={m.id} className="flex items-baseline justify-between gap-3">
-                        <span className="min-w-0 truncate">{m.label}</span>
-                        <span className="shrink-0 font-medium text-foreground">{formatInAndCm(m.valueIn)}</span>
+                      <div key={m.id} className="flex items-center justify-between rounded-lg border border-border/50 bg-background/50 px-3 py-2 text-xs">
+                        <span className="min-w-0 truncate font-medium text-muted-foreground">{m.label}</span>
+                        <span className="shrink-0 font-bold text-foreground">{formatInAndCm(m.valueIn)}</span>
                       </div>
                     ))}
                   </div>

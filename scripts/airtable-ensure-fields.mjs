@@ -10,6 +10,8 @@ const token = requiredEnv("AIRTABLE_TOKEN");
 const baseId = requiredEnv("AIRTABLE_BASE_ID");
 const tableRef = requiredEnv("AIRTABLE_TABLE_ID");
 const PRIORITY_FIELD = process.env.AIRTABLE_PRIORITY_FIELD || "Priority";
+const SYNC_SOURCE_FIELD = process.env.AIRTABLE_SYNC_SOURCE_FIELD || "Last Sync Source";
+const SYNC_AT_FIELD = process.env.AIRTABLE_SYNC_AT_FIELD || "Last Sync At";
 
 const META_BASE = `https://api.airtable.com/v0/meta/bases/${baseId}`;
 
@@ -39,6 +41,8 @@ const REQUIRED_FIELDS = [
   { name: "Tax Estimate", type: "currency", options: { precision: 2, symbol: "$" } },
   { name: "Final Total", type: "currency", options: { precision: 2, symbol: "$" } },
   { name: "Selected Option Id", type: "singleLineText" },
+  { name: SYNC_SOURCE_FIELD, type: "singleLineText" },
+  { name: SYNC_AT_FIELD, type: "singleLineText" },
 ];
 
 const airtableFetch = async (path, init = {}) => {
