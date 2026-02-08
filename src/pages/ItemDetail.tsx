@@ -757,184 +757,198 @@ export default function ItemDetail() {
             ) : null}
           </div>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
-            <Button variant="secondary" onClick={() => void onShareItem()}>
-              Share
-            </Button>
-            <Button variant="secondary" onClick={() => void onDuplicateItem()} disabled={duplicateBusy}>
-              Duplicate
-            </Button>
-            <Button variant="destructive" onClick={() => void onDeleteItem()}>
-              Delete
-            </Button>
+            {optionOnly ? (
+              <Button variant="secondary" onClick={() => setOptionOnlyId(null)}>
+                View parent details
+              </Button>
+            ) : (
+              <>
+                <Button variant="secondary" onClick={() => void onShareItem()}>
+                  Share
+                </Button>
+                <Button variant="secondary" onClick={() => void onDuplicateItem()} disabled={duplicateBusy}>
+                  Duplicate
+                </Button>
+                <Button variant="destructive" onClick={() => void onDeleteItem()}>
+                  Delete
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
-        <div className="mt-4 space-y-3">
-          <div className="space-y-2">
-            <div className="text-sm font-medium">One-tap status</div>
-            <div className="flex flex-wrap gap-2">
-              {ITEM_STATUSES.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => void onSelectStatus(s)}
-                  className={[
-                    "rounded-full border px-3 py-2 text-sm font-medium",
-                    s === status ? "border-foreground bg-foreground text-background" : "bg-background",
-                  ].join(" ")}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+        {optionOnly ? (
+          <div className="mt-4 rounded-lg border bg-secondary/30 p-3 text-sm">
+            <div className="font-medium">Parent item hidden in option edit mode.</div>
+            <div className="mt-1 text-xs text-muted-foreground">Use “View parent details” to edit the parent item.</div>
           </div>
-
-          <div className="rounded-lg border bg-background p-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-sm font-semibold">Review & source</div>
-                <div className="mt-1 text-xs text-muted-foreground">Mark verified to clear AI/needs-review flags.</div>
-              </div>
-              <div className="flex shrink-0 gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    const at = nowMs();
-                    const base = {
-                      ...(item.provenance || {}),
-                      dataSource,
-                      sourceRef: sourceRef.trim() || null,
-                    };
-                    void commit({ provenance: markProvenanceVerified(base, at) });
-                  }}
-                >
-                  Mark verified
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    const at = nowMs();
-                    const base = {
-                      ...(item.provenance || {}),
-                      dataSource,
-                      sourceRef: sourceRef.trim() || null,
-                    };
-                    void commit({ provenance: markProvenanceNeedsReview(base, at) });
-                  }}
-                >
-                  Needs review
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-3 grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Data source</Label>
-                <select
-                  value={dataSource || ""}
-                  onChange={(e) => {
-                    const v = (e.target.value as DataSource) || null;
-                    setDataSource(v);
-                    void commit({ provenance: { dataSource: v } });
-                  }}
-                  className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                >
-                  <option value="">(none)</option>
-                  <option value="concrete">Concrete</option>
-                  <option value="estimated">Estimated</option>
-                </select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Review status</Label>
-                <select
-                  value={reviewStatus || ""}
-                  onChange={(e) => {
-                    const v = (e.target.value as ReviewStatus) || null;
-                    setReviewStatus(v);
-                    const at = nowMs();
-                    const base = {
-                      ...(item.provenance || {}),
-                      dataSource,
-                      sourceRef: sourceRef.trim() || null,
-                      reviewStatus: v,
-                    };
-                    if (v === "verified") void commit({ provenance: markProvenanceVerified(base, at) });
-                    else if (v === "needs_review") void commit({ provenance: markProvenanceNeedsReview(base, at) });
-                    else void commit({ provenance: { reviewStatus: v } });
-                  }}
-                  className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                >
-                  <option value="">(none)</option>
-                  <option value="needs_review">Needs review</option>
-                  <option value="verified">Verified</option>
-                  <option value="ai_modified">AI modified</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="mt-3 space-y-1.5">
-              <Label>Source ref</Label>
-              <Input
-                value={sourceRef}
-                onChange={(e) => setSourceRef(e.target.value)}
-                onBlur={() => void commit({ provenance: { sourceRef: sourceRef.trim() || null } })}
-                className="h-11 text-base"
-                placeholder='e.g. "Floor plan B1.1"'
-              />
-            </div>
-          </div>
-
-          {selectedOption ? (
-            <div className="rounded-lg border bg-secondary/40 p-3 text-sm">
-              <div className="font-medium">Using selected option: {selectedOption.title}</div>
-              <div className="mt-1 text-xs text-muted-foreground">Parent fields reflect the selected option.</div>
-              <div className="mt-2">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => {
-                    setOptionOnlyId(selectedOption.id);
-                    setOpenOpt((cur) => ({ ...cur, [selectedOption.id]: true }));
-                  }}
-                >
-                  Edit selected option
-                </Button>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="item_name">Name</Label>
-              <Input
-                id="item_name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onBlur={() => void commit({ name: name.trim() || "Item" })}
-                className="h-12 text-base"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="item_room">Room</Label>
-              <select
-                id="item_room"
-                value={room}
-                onChange={(e) => {
-                  const v = e.target.value as RoomId;
-                  setRoom(v);
-                  void commit({ room: v });
-                }}
-                className="h-12 w-full rounded-md border bg-background px-3 text-base"
-              >
-                {orderedRoomIds.map((r) => (
-                  <option key={r} value={r}>
-                    {roomNameById.get(r) || r}
-                  </option>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <div className="space-y-2">
+              <div className="text-sm font-medium">One-tap status</div>
+              <div className="flex flex-wrap gap-2">
+                {ITEM_STATUSES.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => void onSelectStatus(s)}
+                    className={[
+                      "rounded-full border px-3 py-2 text-sm font-medium",
+                      s === status ? "border-foreground bg-foreground text-background" : "bg-background",
+                    ].join(" ")}
+                  >
+                    {s}
+                  </button>
                 ))}
-              </select>
+              </div>
             </div>
-          </div>
+
+            <div className="rounded-lg border bg-background p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">Review & source</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Mark verified to clear AI/needs-review flags.</div>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const at = nowMs();
+                      const base = {
+                        ...(item.provenance || {}),
+                        dataSource,
+                        sourceRef: sourceRef.trim() || null,
+                      };
+                      void commit({ provenance: markProvenanceVerified(base, at) });
+                    }}
+                  >
+                    Mark verified
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      const at = nowMs();
+                      const base = {
+                        ...(item.provenance || {}),
+                        dataSource,
+                        sourceRef: sourceRef.trim() || null,
+                      };
+                      void commit({ provenance: markProvenanceNeedsReview(base, at) });
+                    }}
+                  >
+                    Needs review
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Data source</Label>
+                  <select
+                    value={dataSource || ""}
+                    onChange={(e) => {
+                      const v = (e.target.value as DataSource) || null;
+                      setDataSource(v);
+                      void commit({ provenance: { dataSource: v } });
+                    }}
+                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                  >
+                    <option value="">(none)</option>
+                    <option value="concrete">Concrete</option>
+                    <option value="estimated">Estimated</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Review status</Label>
+                  <select
+                    value={reviewStatus || ""}
+                    onChange={(e) => {
+                      const v = (e.target.value as ReviewStatus) || null;
+                      setReviewStatus(v);
+                      const at = nowMs();
+                      const base = {
+                        ...(item.provenance || {}),
+                        dataSource,
+                        sourceRef: sourceRef.trim() || null,
+                        reviewStatus: v,
+                      };
+                      if (v === "verified") void commit({ provenance: markProvenanceVerified(base, at) });
+                      else if (v === "needs_review") void commit({ provenance: markProvenanceNeedsReview(base, at) });
+                      else void commit({ provenance: { reviewStatus: v } });
+                    }}
+                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                  >
+                    <option value="">(none)</option>
+                    <option value="needs_review">Needs review</option>
+                    <option value="verified">Verified</option>
+                    <option value="ai_modified">AI modified</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="mt-3 space-y-1.5">
+                <Label>Source ref</Label>
+                <Input
+                  value={sourceRef}
+                  onChange={(e) => setSourceRef(e.target.value)}
+                  onBlur={() => void commit({ provenance: { sourceRef: sourceRef.trim() || null } })}
+                  className="h-11 text-base"
+                  placeholder='e.g. "Floor plan B1.1"'
+                />
+              </div>
+            </div>
+
+            {selectedOption ? (
+              <div className="rounded-lg border bg-secondary/40 p-3 text-sm">
+                <div className="font-medium">Using selected option: {selectedOption.title}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Parent fields reflect the selected option.</div>
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => {
+                      setOptionOnlyId(selectedOption.id);
+                      setOpenOpt((cur) => ({ ...cur, [selectedOption.id]: true }));
+                    }}
+                  >
+                    Edit selected option
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="item_name">Name</Label>
+                <Input
+                  id="item_name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onBlur={() => void commit({ name: name.trim() || "Item" })}
+                  className="h-12 text-base"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="item_room">Room</Label>
+                <select
+                  id="item_room"
+                  value={room}
+                  onChange={(e) => {
+                    const v = e.target.value as RoomId;
+                    setRoom(v);
+                    void commit({ room: v });
+                  }}
+                  className="h-12 w-full rounded-md border bg-background px-3 text-base"
+                >
+                  {orderedRoomIds.map((r) => (
+                    <option key={r} value={r}>
+                      {roomNameById.get(r) || r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -1289,6 +1303,7 @@ export default function ItemDetail() {
             onRemove={(attId) => void handleRemoveAttachment("item", item.id, attId)}
           />
         </div>
+        )}
       </Card>
 
       <Card className="p-4">
