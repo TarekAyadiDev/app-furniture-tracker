@@ -159,3 +159,27 @@ export async function rekeyAttachmentParent(
     ),
   );
 }
+
+export async function moveAttachmentsParent(
+  fromType: AttachmentParentType,
+  fromId: string,
+  toType: AttachmentParentType,
+  toId: string,
+): Promise<void> {
+  if (fromType === toType && fromId === toId) return;
+  const rows = await idbGetAllByIndex<AttachmentRecord>("attachments", "parentKey", parentKey(fromType, fromId));
+  if (!rows.length) return;
+  const ts = nowMs();
+  await Promise.all(
+    rows.map((att) =>
+      idbPut("attachments", {
+        ...att,
+        parentType: toType,
+        parentId: toId,
+        parentKey: parentKey(toType, toId),
+        updatedAt: ts,
+      }),
+    ),
+  );
+  await touchParent(toType, toId);
+}

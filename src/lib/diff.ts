@@ -60,6 +60,20 @@ function diffItemSpecs(existing: Item, incoming: Item): DiffChange[] {
   return changes;
 }
 
+function diffOptionSpecs(existing: Option, incoming: Option): DiffChange[] {
+  const a = existing.specs && typeof existing.specs === "object" ? existing.specs : null;
+  const b = incoming.specs && typeof incoming.specs === "object" ? incoming.specs : null;
+
+  const keys = new Set<string>([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const changes: DiffChange[] = [];
+  for (const key of [...keys].sort()) {
+    const from = normalizeSpecValue(a ? (a as any)[key] : null);
+    const to = normalizeSpecValue(b ? (b as any)[key] : null);
+    if (!valuesEqual(from, to)) changes.push({ field: `specs.${key}`, from, to });
+  }
+  return changes;
+}
+
 export function diffMeasurement(existing: Measurement, incoming: Measurement): DiffChange[] {
   return diffBySpecs(existing, incoming, MEASUREMENT_TRACKED_FIELDS);
 }
@@ -69,10 +83,9 @@ export function diffItem(existing: Item, incoming: Item): DiffChange[] {
 }
 
 export function diffOption(existing: Option, incoming: Option): DiffChange[] {
-  return diffBySpecs(existing, incoming, OPTION_TRACKED_FIELDS);
+  return [...diffBySpecs(existing, incoming, OPTION_TRACKED_FIELDS), ...diffOptionSpecs(existing, incoming)];
 }
 
 export function diffRoom(existing: Room, incoming: Room): DiffChange[] {
   return diffBySpecs(existing, incoming, ROOM_TRACKED_FIELDS);
 }
-

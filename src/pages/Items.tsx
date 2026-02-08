@@ -10,10 +10,12 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, type Item, type ItemStatus, type RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, type Item, type ItemStatus, type Option, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
+import { Badge } from "@/components/ui/badge";
+import { ChevronDown } from "lucide-react";
 
 type RoomFilter = RoomId | "All";
 type StatusFilter = ItemStatus | "All";
@@ -22,10 +24,29 @@ function includesText(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
+function optionTotalOrNull(opt: Option): number | null {
+  const hasAny =
+    typeof opt.price === "number" ||
+    typeof opt.shipping === "number" ||
+    typeof opt.taxEstimate === "number" ||
+    typeof opt.discount === "number";
+  if (!hasAny) return null;
+  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
+}
+
+function pickSelectedOption(item: Item, list: Option[]): Option | null {
+  if (item.selectedOptionId) {
+    const found = list.find((o) => o.id === item.selectedOptionId);
+    if (found) return found;
+  }
+  return list.find((o) => o.selected) || null;
+}
+
 export default function Items() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, options, reorderRooms, reorderItems, createItem, createOption } = useData();
+  const { orderedRooms, roomNameById, items, options, reorderRooms, reorderItems, reorderOptions, createItem, updateItem, createOption, updateOption } =
+    useData();
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -39,6 +60,8 @@ export default function Items() {
   const [reorderRoomsMode, setReorderRoomsMode] = useState(false);
   const [reorderRoomId, setReorderRoomId] = useState<RoomId | null>(null);
   const [duplicateItemId, setDuplicateItemId] = useState<string | null>(null);
+  const [openItemOptions, setOpenItemOptions] = useState<Record<string, boolean>>({});
+  const [reorderOptionsForItem, setReorderOptionsForItem] = useState<Record<string, boolean>>({});
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
 
@@ -68,6 +91,7 @@ export default function Items() {
         link: it.link ?? null,
         notes: it.notes ?? null,
         priority: it.priority ?? null,
+        tags: it.tags ? [...it.tags] : null,
         dimensions: it.dimensions ? { ...it.dimensions } : undefined,
         specs: it.specs ? { ...it.specs } : null,
       });
@@ -101,7 +125,11 @@ export default function Items() {
           taxEstimate: opt.taxEstimate ?? null,
           discount: opt.discount ?? null,
           dimensionsText: opt.dimensionsText ?? null,
+          dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
+          specs: opt.specs ? { ...opt.specs } : null,
           notes: opt.notes ?? null,
+          priority: opt.priority ?? null,
+          tags: opt.tags ? [...opt.tags] : null,
           selected: Boolean(opt.selected),
         });
         optionIdMap.set(opt.id, newOptId);
@@ -124,6 +152,31 @@ export default function Items() {
     }
   }
 
+  async function onSelectOptionForItem(item: Item, option: Option, list: Option[]) {
+    try {
+      const others = list.filter((o) => o.id !== option.id);
+      await Promise.all([
+        updateOption(option.id, { selected: true }),
+        ...others.map((o) => updateOption(o.id, { selected: false })),
+      ]);
+      const total = optionTotalOrNull(option);
+      await updateItem(item.id, {
+        status: "Selected",
+        selectedOptionId: option.id,
+        name: option.title || item.name,
+        store: option.store ?? null,
+        link: option.link ?? null,
+        price: total ?? null,
+        priority: typeof option.priority === "number" ? option.priority : null,
+        tags: option.tags ? [...option.tags] : null,
+        dimensions: option.dimensions ? { ...option.dimensions } : undefined,
+        specs: option.specs ? { ...option.specs } : null,
+      });
+    } catch (err: any) {
+      toast({ title: "Selection failed", description: err?.message || "Could not select this option." });
+    }
+  }
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -140,6 +193,35 @@ export default function Items() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  const optionsByItem = useMemo(() => {
+    const map = new Map<string, Option[]>();
+    for (const o of options) {
+      if (o.syncState === "deleted") continue;
+      if (!map.has(o.itemId)) map.set(o.itemId, []);
+      map.get(o.itemId)!.push(o);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => {
+        const sa = typeof a.sort === "number" ? a.sort : 999999;
+        const sb = typeof b.sort === "number" ? b.sort : 999999;
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      });
+    }
+    return map;
+  }, [options]);
+
+  const selectedOptionTotals = useMemo(() => {
+    const totals = new Map<string, number | null>();
+    for (const it of items) {
+      if (it.syncState === "deleted") continue;
+      const list = optionsByItem.get(it.id) || [];
+      const selected = pickSelectedOption(it, list);
+      totals.set(it.id, selected ? optionTotalOrNull(selected) : null);
+    }
+    return totals;
+  }, [items, optionsByItem]);
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const storeNeedle = storeFilter.trim().toLowerCase();
@@ -152,9 +234,10 @@ export default function Items() {
       .filter((i) => (storeNeedle ? includesText(i.store || "", storeNeedle) : true))
       .filter((i) => {
         if (min === null && max === null) return true;
-        if (i.price === null || i.price === undefined) return false;
-        if (min !== null && i.price < min) return false;
-        if (max !== null && i.price > max) return false;
+        const effective = selectedOptionTotals.get(i.id) ?? i.price ?? null;
+        if (effective === null) return false;
+        if (min !== null && effective < min) return false;
+        if (max !== null && effective > max) return false;
         return true;
       })
       .filter((i) => {
@@ -162,7 +245,7 @@ export default function Items() {
         const blob = `${i.name} ${i.category} ${i.store || ""} ${i.notes || ""}`;
         return includesText(blob, needle);
       });
-  }, [items, q, roomFilter, statusFilter, storeFilter, minPrice, maxPrice]);
+  }, [items, q, roomFilter, statusFilter, storeFilter, minPrice, maxPrice, selectedOptionTotals]);
 
   const byRoom = useMemo(() => {
     const map = new Map<RoomId, typeof filtered>();
@@ -186,24 +269,6 @@ export default function Items() {
     }
     return map;
   }, [filtered, orderedRooms]);
-
-  const optionSummaryByItem = useMemo(() => {
-    const m = new Map<
-      string,
-      {
-        count: number;
-        selectedTitle?: string;
-      }
-    >();
-    for (const o of options) {
-      if (o.syncState === "deleted") continue;
-      const entry = m.get(o.itemId) || { count: 0 };
-      entry.count += 1;
-      if (o.selected) entry.selectedTitle = o.title;
-      m.set(o.itemId, entry);
-    }
-    return m;
-  }, [options]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -352,7 +417,12 @@ export default function Items() {
                   ) : (
                     <div className="space-y-2">
                       {group.map((it) => {
-                        const opt = optionSummaryByItem.get(it.id);
+                        const itemOpts = optionsByItem.get(it.id) || [];
+                        const selectedOpt = pickSelectedOption(it, itemOpts);
+                        const selectedTotal = selectedOpt ? optionTotalOrNull(selectedOpt) : null;
+                        const displayPrice = selectedTotal ?? it.price ?? null;
+                        const openOptions = Boolean(openItemOptions[it.id]);
+                        const openOptReorder = Boolean(reorderOptionsForItem[it.id]);
                         const modifiedFields = Array.isArray(it.provenance?.modifiedFields) ? it.provenance.modifiedFields : [];
                         return (
                           <Card key={it.id} className="p-3">
@@ -392,20 +462,29 @@ export default function Items() {
                                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                     <span className="truncate">{it.category || "Other"}</span>
                                     {it.store ? <span className="truncate">{it.store}</span> : null}
-                                    {it.price ? (
-                                      <span>{formatMoneyUSD(it.price)}</span>
-                                    ) : (
-                                      <span className="italic">no price</span>
-                                    )}
+                                    {displayPrice ? <span>{formatMoneyUSD(displayPrice)}</span> : <span className="italic">no price</span>}
                                     {it.qty !== 1 ? <span>qty {it.qty}</span> : null}
                                     {it.priority ? <span>P{it.priority}</span> : null}
-                                    {opt?.selectedTitle ? (
-                                      <span className="font-medium text-foreground">Selected: {opt.selectedTitle}</span>
-                                    ) : opt?.count ? (
-                                      <span>{opt.count} option(s)</span>
+                                    {selectedOpt ? (
+                                      <span className="font-medium text-foreground">Selected: {selectedOpt.title}</span>
+                                    ) : itemOpts.length ? (
+                                      <span>{itemOpts.length} option(s)</span>
                                     ) : null}
                                   </div>
                                 </div>
+                                {itemOpts.length ? (
+                                  <button
+                                    type="button"
+                                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setOpenItemOptions((cur) => ({ ...cur, [it.id]: !openOptions }));
+                                    }}
+                                  >
+                                    <ChevronDown className={["h-4 w-4 transition-transform", openOptions ? "rotate-180" : ""].join(" ")} />
+                                    {openOptions ? "Hide variations" : `Show variations (${itemOpts.length})`}
+                                  </button>
+                                ) : null}
                               </div>
 
                               <div className="flex shrink-0 flex-col gap-2">
@@ -441,6 +520,100 @@ export default function Items() {
                                 </Button>
                               </div>
                             </div>
+
+                            {openOptions ? (
+                              <div className="mt-3 border-t pt-3">
+                                {openOptReorder ? (
+                                  <DragReorderList
+                                    ariaLabel={`Reorder options for ${it.name}`}
+                                    items={itemOpts.map((opt) => {
+                                      const total = optionTotalOrNull(opt);
+                                      const subtitleParts = [
+                                        opt.store ? String(opt.store) : "",
+                                        total ? formatMoneyUSD(total) : "",
+                                        opt.selected ? "selected" : "",
+                                      ].filter(Boolean);
+                                      return {
+                                        id: opt.id,
+                                        title: opt.title,
+                                        subtitle: subtitleParts.join(" · "),
+                                      };
+                                    })}
+                                    onCommit={async (ids) => {
+                                      await reorderOptions(it.id, ids);
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="space-y-2">
+                                    {itemOpts.map((opt) => {
+                                      const total = optionTotalOrNull(opt);
+                                      const isSelected = selectedOpt?.id === opt.id || opt.selected;
+                                      return (
+                                        <div key={opt.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-background/70 p-3">
+                                          <OptionPhotoStrip optionId={opt.id} />
+                                          <div className="min-w-0 flex-1">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                              <div className="truncate text-sm font-semibold">{opt.title}</div>
+                                              {isSelected ? <Badge>Selected</Badge> : <Badge variant="secondary">Option</Badge>}
+                                            </div>
+                                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                              {opt.store ? <span>{opt.store}</span> : null}
+                                              {typeof opt.priority === "number" ? <span>P{opt.priority}</span> : null}
+                                              {total ? <span>{formatMoneyUSD(total)}</span> : <span className="italic">no total</span>}
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <Button
+                                              size="sm"
+                                              variant={isSelected ? "default" : "secondary"}
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                void onSelectOptionForItem(it, opt, itemOpts);
+                                              }}
+                                            >
+                                              {isSelected ? "Selected" : "Select"}
+                                            </Button>
+                                            {opt.link ? (
+                                              <a
+                                                href={opt.link}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                                onClick={(e) => e.stopPropagation()}
+                                              >
+                                                View
+                                              </a>
+                                            ) : null}
+                                            <Link
+                                              to={`/items/${it.id}?option=${encodeURIComponent(opt.id)}`}
+                                              className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              Edit
+                                            </Link>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+
+                                <div className="mt-3">
+                                  <Button
+                                    variant={openOptReorder ? "default" : "secondary"}
+                                    className="w-full"
+                                    onClick={() =>
+                                      setReorderOptionsForItem((cur) => ({
+                                        ...cur,
+                                        [it.id]: !openOptReorder,
+                                      }))
+                                    }
+                                  >
+                                    {openOptReorder ? "Done reordering variations" : "Reorder variations"}
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : null}
                           </Card>
                         );
                       })}
@@ -634,6 +807,130 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
         variant="secondary"
         className="h-7 px-2 text-[11px]"
         onClick={() => fileInputRef.current?.click()}
+      >
+        Add photo
+      </Button>
+    </div>
+  );
+}
+
+function OptionPhotoStrip({ optionId }: { optionId: string }) {
+  const { toast } = useToast();
+  const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+  const max = 3;
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    listAttachments("option", optionId)
+      .then((rows) => {
+        if (active) setAttachments(rows);
+      })
+      .catch(() => {
+        if (active) setAttachments([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [optionId]);
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    const toRevoke: string[] = [];
+    for (const att of attachments) {
+      if (att.sourceUrl) {
+        next[att.id] = att.sourceUrl;
+        continue;
+      }
+      const url = URL.createObjectURL(att.blob);
+      next[att.id] = url;
+      toRevoke.push(url);
+    }
+    setUrls(next);
+    return () => {
+      toRevoke.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [attachments]);
+
+  async function onRemove(attId: string) {
+    await deleteAttachment(attId);
+    setAttachments((cur) => cur.filter((att) => att.id !== attId));
+  }
+
+  async function onAddFromFiles(files: FileList | null) {
+    if (!files || !files.length) return;
+    if (attachments.length >= max) {
+      toast({ title: "Limit reached", description: "Up to 3 photos per option." });
+      return;
+    }
+    const remaining = Math.max(0, max - attachments.length);
+    const incoming = Array.from(files).slice(0, remaining);
+    if (!incoming.length) return;
+    if (incoming.length < files.length) {
+      toast({ title: "Limit reached", description: `Only added ${incoming.length} photo(s).` });
+    }
+    try {
+      await Promise.all(incoming.map((file) => addAttachment("option", optionId, file)));
+      const rows = await listAttachments("option", optionId);
+      setAttachments(rows);
+    } catch (err: any) {
+      toast({ title: "Photo upload failed", description: err?.message || "Could not upload photo." });
+    }
+  }
+
+  return (
+    <div className="w-[88px] shrink-0 space-y-2">
+      {attachments.length ? (
+        <div className="flex flex-col gap-2">
+          {attachments[0] && (
+            <div className="relative aspect-square w-full overflow-hidden rounded-lg border bg-background shadow-sm">
+              {urls[attachments[0].id] ? (
+                <img src={urls[attachments[0].id]} alt={attachments[0].name || "Option photo"} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">Loading...</div>
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  void onRemove(attachments[0].id);
+                }}
+                className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/80 text-xs text-foreground backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
+                aria-label="Remove photo"
+              >
+                &times;
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-[10px] text-muted-foreground">
+          <span>No photo</span>
+        </div>
+      )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          void onAddFromFiles(e.target.files);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        }}
+      />
+      <Button
+        type="button"
+        size="sm"
+        variant="secondary"
+        className="h-7 px-2 text-[10px]"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          fileInputRef.current?.click();
+        }}
       >
         Add photo
       </Button>

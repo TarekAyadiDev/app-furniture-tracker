@@ -17,6 +17,7 @@ import {
 import { notifyDbChanged, subscribeDbChanges } from "@/storage/notify";
 import { getTownHollywoodExampleBundle } from "@/examples/town-hollywood";
 import { buildRoomNameMap, ensureRoomNames, normalizeRoomName, orderRooms } from "@/lib/rooms";
+import { moveAttachmentsParent } from "@/storage/attachments";
 
 type HomeMeta = NonNullable<ExportBundleV1["home"]>;
 
@@ -27,6 +28,14 @@ type UnitPreference = "in" | "cm";
 type SyncSummary = {
   push: Record<string, number>;
   pull: Record<string, number>;
+};
+
+type OptionSortKey = "price" | "priority" | "name";
+type OptionSortDir = "asc" | "desc";
+
+type UpdateOptionFn = {
+  (id: string, patch: Partial<Option>): Promise<void>;
+  (parentItemId: string, optionId: string, patch: Partial<Option>): Promise<void>;
 };
 
 type DataContextValue = {
@@ -60,10 +69,15 @@ type DataContextValue = {
   createItem: (partial: Partial<Item>) => Promise<string>;
   updateItem: (id: string, patch: Partial<Item>) => Promise<void>;
   deleteItem: (id: string) => Promise<void>;
+  convertItemToOption: (parentItemId: string, sourceItemId: string) => Promise<void>;
 
   createOption: (partial: Partial<Option> & { itemId: string }) => Promise<string>;
-  updateOption: (id: string, patch: Partial<Option>) => Promise<void>;
+  updateOption: UpdateOptionFn;
   deleteOption: (id: string) => Promise<void>;
+  sortAndFilterOptions: (
+    parentItemId: string,
+    opts: { sortKey: OptionSortKey; sortDir: OptionSortDir; minPrice?: number | null; maxPrice?: number | null },
+  ) => Option[];
 
   createMeasurement: (partial: Partial<Measurement> & { room: RoomId }) => Promise<string>;
   updateMeasurement: (id: string, patch: Partial<Measurement>) => Promise<void>;
@@ -170,6 +184,29 @@ function coerceSpecs(input: unknown): Item["specs"] {
     else out[key] = JSON.stringify(v);
   }
   return Object.keys(out).length ? out : null;
+}
+
+function coerceTags(input: unknown): string[] | null {
+  if (typeof input === "string") {
+    const tags = input
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    return tags.length ? tags : null;
+  }
+  if (!Array.isArray(input)) return null;
+  const cleaned = input.map((t) => String(t ?? "").trim()).filter(Boolean);
+  return cleaned.length ? cleaned : null;
+}
+
+function optionTotalOrNull(opt: Option): number | null {
+  const hasAny =
+    typeof opt.price === "number" ||
+    typeof opt.shipping === "number" ||
+    typeof opt.taxEstimate === "number" ||
+    typeof opt.discount === "number";
+  if (!hasAny) return null;
+  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0) - (opt.discount || 0);
 }
 
 function dimsFromLegacySpecs(specs: Item["specs"]): Item["dimensions"] | undefined {
@@ -298,6 +335,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         room,
         category: String((it as any)?.category || "Other").trim() || "Other",
         status: normalizeStatus((it as any)?.status),
+        selectedOptionId: typeof (it as any)?.selectedOptionId === "string" ? (it as any).selectedOptionId : null,
         sort: coerceSort((it as any)?.sort),
         price: coerceNumberOrNull((it as any)?.price),
         qty: qtyRaw !== null && qtyRaw > 0 ? Math.round(qtyRaw) : 1,
@@ -305,6 +343,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         link: typeof (it as any)?.link === "string" ? (it as any).link : null,
         notes: typeof (it as any)?.notes === "string" ? (it as any).notes : null,
         priority: coerceNumberOrNull((it as any)?.priority),
+        tags: coerceTags((it as any)?.tags),
         dimensions: coerceDims((it as any)?.dimensions),
         specs: coerceSpecs((it as any)?.specs),
         createdAt,
@@ -333,8 +372,13 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
             taxEstimate: coerceNumberOrNull((op as any)?.taxEstimate),
             discount: coerceNumberOrNull((op as any)?.discount),
             dimensionsText: typeof (op as any)?.dimensionsText === "string" ? (op as any).dimensionsText : null,
+            dimensions: coerceDims((op as any)?.dimensions),
+            specs: coerceSpecs((op as any)?.specs),
             notes: typeof (op as any)?.notes === "string" ? (op as any).notes : null,
+            priority: coerceNumberOrNull((op as any)?.priority),
+            tags: coerceTags((op as any)?.tags),
             selected: Boolean((op as any)?.selected),
+            sourceItemId: typeof (op as any)?.sourceItemId === "string" ? (op as any).sourceItemId : undefined,
             createdAt,
             updatedAt,
             remoteId: typeof (op as any)?.remoteId === "string" ? (op as any).remoteId : undefined,
@@ -368,7 +412,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
     });
 
     // Ensure all rooms exist
-    const rooms = makeDefaultRooms().map((r) => ({ ...r, syncState: undefined }));
+    const rooms: Room[] = makeDefaultRooms().map((r) => ({ ...r, syncState: undefined }));
     const roomById = new Map(rooms.map((r) => [r.id, r] as const));
 
     function ensureLegacyRoom(id: RoomId) {
@@ -696,6 +740,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         room,
         category: (partial.category || "Other").toString().trim() || "Other",
         status: normalizeStatus(partial.status),
+        selectedOptionId: typeof partial.selectedOptionId === "string" ? partial.selectedOptionId : null,
         sort,
         price: typeof partial.price === "number" ? partial.price : null,
         qty: typeof partial.qty === "number" && partial.qty > 0 ? Math.round(partial.qty) : 1,
@@ -703,6 +748,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         link: typeof partial.link === "string" ? partial.link : null,
         notes: typeof partial.notes === "string" ? partial.notes : null,
         priority: typeof partial.priority === "number" ? partial.priority : null,
+        tags: coerceTags(partial.tags),
         dimensions: partial.dimensions ? partial.dimensions : undefined,
         specs: partial.specs ? partial.specs : null,
         provenance: makeHumanCreatedProvenance(partial.provenance, ts),
@@ -721,6 +767,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const cur = all.find((x) => x.id === id);
     if (!cur) return;
     const ts = nowMs();
+    const nextTags = typeof patch.tags === "undefined" ? cur.tags ?? null : coerceTags(patch.tags);
     const next: Item = {
       ...cur,
       ...patch,
@@ -728,6 +775,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       status: normalizeStatus(patch.status ?? cur.status),
       category: typeof patch.category === "string" ? patch.category : cur.category,
       name: typeof patch.name === "string" ? patch.name : cur.name,
+      tags: nextTags,
       updatedAt: ts,
       syncState: patch.syncState ?? "dirty",
       provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
@@ -741,6 +789,79 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const cur = all.find((x) => x.id === id);
     if (!cur) return;
     await idbPut("items", { ...cur, syncState: "deleted", updatedAt: nowMs() });
+    notifyDbChanged();
+  }, []);
+
+  const convertItemToOption = useCallback(async (parentItemId: string, sourceItemId: string) => {
+    if (parentItemId === sourceItemId) throw new Error("Choose a different item to import.");
+    const [allItems, allOptions] = await Promise.all([idbGetAll<Item>("items"), idbGetAll<Option>("options")]);
+    const parent = allItems.find((x) => x.id === parentItemId && x.syncState !== "deleted");
+    const source = allItems.find((x) => x.id === sourceItemId && x.syncState !== "deleted");
+    if (!parent || !source) throw new Error("Item not found or already removed.");
+
+    const existingOptions = allOptions.filter((o) => o.syncState !== "deleted" && o.itemId === parentItemId);
+    const sourceLink = String(source.link || "").trim().toLowerCase();
+    const sourceTitle = String(source.name || "").trim().toLowerCase();
+    const sourcePrice = typeof source.price === "number" ? source.price : null;
+
+    const isDuplicate = existingOptions.some((o) => {
+      if (o.sourceItemId && o.sourceItemId === sourceItemId) return true;
+      const optLink = String(o.link || "").trim().toLowerCase();
+      if (sourceLink && optLink && optLink === sourceLink) return true;
+      const optTitle = String(o.title || "").trim().toLowerCase();
+      const optPrice = typeof o.price === "number" ? o.price : null;
+      if (sourceTitle && optTitle && sourceTitle === optTitle && sourcePrice === optPrice) return true;
+      return false;
+    });
+    if (isDuplicate) throw new Error("Option already exists for this item.");
+
+    const sourceOptions = allOptions.filter((o) => o.syncState !== "deleted" && o.itemId === sourceItemId);
+    const nestedNote =
+      sourceOptions.length > 0 ? `Imported from an item with ${sourceOptions.length} nested option${sourceOptions.length === 1 ? "" : "s"}. Nested options were not migrated.` : "";
+    const baseNotes = typeof source.notes === "string" ? source.notes.trim() : "";
+    const mergedNotes = [baseNotes, nestedNote].filter(Boolean).join("\n\n") || null;
+
+    const minSort = existingOptions
+      .filter((o) => typeof o.sort === "number")
+      .reduce((min, o) => Math.min(min, o.sort as number), 0);
+    const sort = minSort - 1;
+    const ts = nowMs();
+    const optionId = newId("o");
+    const option: Option = {
+      id: optionId,
+      remoteId: null,
+      syncState: "dirty",
+      itemId: parentItemId,
+      title: source.name || "Option",
+      sort,
+      store: source.store ?? null,
+      link: source.link ?? null,
+      price: source.price ?? null,
+      notes: mergedNotes,
+      priority: source.priority ?? null,
+      tags: coerceTags(source.tags),
+      dimensions: source.dimensions ? { ...source.dimensions } : undefined,
+      specs: source.specs ? { ...source.specs } : null,
+      selected: false,
+      sourceItemId: sourceItemId,
+      provenance: makeHumanCreatedProvenance(source.provenance, ts),
+      createdAt: ts,
+      updatedAt: ts,
+    };
+
+    await idbPut("options", option);
+
+    if (sourceOptions.length) {
+      const deletedOptions = sourceOptions.map((o) => ({ ...o, syncState: "deleted", updatedAt: ts }));
+      await idbBulkPut("options", deletedOptions);
+    }
+
+    await idbPut("items", { ...source, syncState: "deleted", updatedAt: ts });
+    try {
+      await moveAttachmentsParent("item", sourceItemId, "option", optionId);
+    } catch {
+      // Ignore attachment move failures; item deletion will still proceed.
+    }
     notifyDbChanged();
   }, []);
 
@@ -767,8 +888,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       taxEstimate: typeof partial.taxEstimate === "number" ? partial.taxEstimate : null,
       discount: typeof partial.discount === "number" ? partial.discount : null,
       dimensionsText: typeof partial.dimensionsText === "string" ? partial.dimensionsText : null,
+      dimensions: partial.dimensions ? partial.dimensions : undefined,
+      specs: partial.specs ? partial.specs : null,
       notes: typeof partial.notes === "string" ? partial.notes : null,
+      priority: typeof partial.priority === "number" ? partial.priority : null,
+      tags: coerceTags(partial.tags),
       selected: Boolean(partial.selected),
+      sourceItemId: typeof partial.sourceItemId === "string" ? partial.sourceItemId : undefined,
       provenance: makeHumanCreatedProvenance(partial.provenance, ts),
       createdAt: ts,
       updatedAt: ts,
@@ -778,14 +904,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, []);
 
-  const updateOption = useCallback(async (id: string, patch: Partial<Option>) => {
+  const updateOption = useCallback<UpdateOptionFn>(async (arg1: string, arg2: Partial<Option> | string, arg3?: Partial<Option>) => {
+    const optionId = typeof arg3 === "undefined" ? arg1 : (arg2 as string);
+    const parentItemId = typeof arg3 === "undefined" ? null : arg1;
+    const patch = (typeof arg3 === "undefined" ? arg2 : arg3) as Partial<Option>;
+
     const all = await idbGetAll<Option>("options");
-    const cur = all.find((x) => x.id === id);
+    const cur = all.find((x) => x.id === optionId && (!parentItemId || x.itemId === parentItemId));
     if (!cur) return;
     const ts = nowMs();
+    const nextTags = typeof patch.tags === "undefined" ? cur.tags ?? null : coerceTags(patch.tags);
     const next: Option = {
       ...cur,
       ...patch,
+      tags: nextTags,
       updatedAt: ts,
       syncState: patch.syncState ?? "dirty",
       provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
@@ -999,6 +1131,48 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     await idbBulkPut("options", updates);
     notifyDbChanged();
   }, []);
+
+  const sortAndFilterOptions = useCallback(
+    (parentItemId: string, opts: { sortKey: OptionSortKey; sortDir: OptionSortDir; minPrice?: number | null; maxPrice?: number | null }) => {
+      const min = typeof opts.minPrice === "number" ? opts.minPrice : null;
+      const max = typeof opts.maxPrice === "number" ? opts.maxPrice : null;
+      const base = options.filter((o) => o.syncState !== "deleted" && o.itemId === parentItemId);
+      const filtered = base.filter((o) => {
+        if (min === null && max === null) return true;
+        const total = optionTotalOrNull(o);
+        if (total === null) return false;
+        if (min !== null && total < min) return false;
+        if (max !== null && total > max) return false;
+        return true;
+      });
+
+      const dir = opts.sortDir === "desc" ? -1 : 1;
+      const sorted = filtered.slice().sort((a, b) => {
+        if (opts.sortKey === "name") {
+          const na = a.title.trim().toLowerCase();
+          const nb = b.title.trim().toLowerCase();
+          if (na !== nb) return na.localeCompare(nb) * dir;
+        } else if (opts.sortKey === "priority") {
+          const pa = typeof a.priority === "number" ? a.priority : 999999;
+          const pb = typeof b.priority === "number" ? b.priority : 999999;
+          if (pa !== pb) return (pa - pb) * dir;
+        } else {
+          const ta = optionTotalOrNull(a);
+          const tb = optionTotalOrNull(b);
+          if (ta === null && tb !== null) return 1;
+          if (tb === null && ta !== null) return -1;
+          if (ta !== null && tb !== null && ta !== tb) return (ta - tb) * dir;
+        }
+        const sa = typeof a.sort === "number" ? a.sort : 999999;
+        const sb = typeof b.sort === "number" ? b.sort : 999999;
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      });
+
+      return sorted;
+    },
+    [options],
+  );
 
   const renameCategory = useCallback(async (oldName: string, newName: string) => {
     const from = oldName.trim();
@@ -1300,9 +1474,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       createItem,
       updateItem,
       deleteItem,
+      convertItemToOption,
       createOption,
       updateOption,
       deleteOption,
+      sortAndFilterOptions,
       createMeasurement,
       updateMeasurement,
       deleteMeasurement,
@@ -1339,9 +1515,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       createItem,
       updateItem,
       deleteItem,
+      convertItemToOption,
       createOption,
       updateOption,
       deleteOption,
+      sortAndFilterOptions,
       createMeasurement,
       updateMeasurement,
       deleteMeasurement,

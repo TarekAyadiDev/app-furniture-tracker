@@ -71,6 +71,7 @@ export type Item = {
   room: RoomId;
   category: string;
   status: ItemStatus;
+  selectedOptionId?: string | null;
   // Manual ordering within a room (lower comes first).
   sort?: number | null;
   price?: number | null;
@@ -79,6 +80,7 @@ export type Item = {
   link?: string | null;
   notes?: string | null;
   priority?: number | null;
+  tags?: string[] | null;
   dimensions?: Dimensions;
   // Flexible per-item attributes (size, finish, etc).
   specs?: Record<string, string | number | boolean | null> | null;
@@ -105,8 +107,13 @@ export type Option = {
   taxEstimate?: number | null;
   discount?: number | null;
   dimensionsText?: string | null;
+  dimensions?: Dimensions;
+  specs?: Record<string, string | number | boolean | null> | null;
   notes?: string | null;
+  priority?: number | null;
+  tags?: string[] | null;
   selected?: boolean;
+  sourceItemId?: string;
 
   provenance?: Provenance;
   createdAt: number;

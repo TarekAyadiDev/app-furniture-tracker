@@ -4,8 +4,10 @@ import { DataSourceBadge } from "@/components/DataSourceBadge";
 import { ReviewStatusBadge } from "@/components/ReviewStatusBadge";
 import { StatusBadge } from "@/components/StatusBadge";
 import { DragReorderList } from "@/components/reorder/DragReorderList";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,8 +20,18 @@ import { useToast } from "@/hooks/use-toast";
 import { shareData } from "@/lib/share";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 
-function optionFinalTotal(o: Option) {
+function optionTotalOrNull(o: Option): number | null {
+  const hasAny =
+    typeof o.price === "number" ||
+    typeof o.shipping === "number" ||
+    typeof o.taxEstimate === "number" ||
+    typeof o.discount === "number";
+  if (!hasAny) return null;
   return (o.price || 0) + (o.shipping || 0) + (o.taxEstimate || 0) - (o.discount || 0);
+}
+
+function optionFinalTotal(o: Option) {
+  return optionTotalOrNull(o) ?? 0;
 }
 
 const CATEGORY_PRESETS: Record<string, string[]> = {
@@ -58,6 +70,63 @@ function parseSpecValue(raw: string): string | number | boolean | null {
   return t;
 }
 
+function includesText(haystack: string, needle: string) {
+  return haystack.toLowerCase().includes(needle.toLowerCase());
+}
+
+function normalizeLink(value: string | null | undefined) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function formatDimensions(opt: Option) {
+  if (opt.dimensionsText && opt.dimensionsText.trim()) return opt.dimensionsText.trim();
+  const w = opt.dimensions?.wIn;
+  const d = opt.dimensions?.dIn;
+  const h = opt.dimensions?.hIn;
+  if (w === null && d === null && h === null) return "-";
+  if (typeof w === "undefined" && typeof d === "undefined" && typeof h === "undefined") return "-";
+  const parts = [w ? `${w}w` : null, d ? `${d}d` : null, h ? `${h}h` : null].filter(Boolean);
+  return parts.length ? `${parts.join(" x ")} in` : "-";
+}
+
+function formatSpecs(specs: Option["specs"]) {
+  if (!specs || typeof specs !== "object") return "-";
+  const entries = Object.entries(specs);
+  if (!entries.length) return "-";
+  return entries
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([k, v]) => `${k}: ${v === null || typeof v === "undefined" ? "" : String(v)}`)
+    .join(", ");
+}
+
+function pickBestOptionId(options: Option[]): string | null {
+  if (!options.length) return null;
+  const hasPriority = options.some((o) => typeof o.priority === "number");
+  const sorted = options.slice().sort((a, b) => {
+    if (hasPriority) {
+      const pa = typeof a.priority === "number" ? a.priority : 999999;
+      const pb = typeof b.priority === "number" ? b.priority : 999999;
+      if (pa !== pb) return pa - pb;
+    }
+    const ta = optionTotalOrNull(a);
+    const tb = optionTotalOrNull(b);
+    if (ta === null && tb !== null) return 1;
+    if (tb === null && ta !== null) return -1;
+    if (ta !== null && tb !== null && ta !== tb) return ta - tb;
+    return a.title.localeCompare(b.title);
+  });
+  return sorted[0]?.id ?? null;
+}
+
+function normalizeDimensionsInput(input: { wIn?: number | null; dIn?: number | null; hIn?: number | null }) {
+  const next: { wIn?: number | null; dIn?: number | null; hIn?: number | null } = {};
+  if (typeof input.wIn === "number" || input.wIn === null) next.wIn = input.wIn;
+  if (typeof input.dIn === "number" || input.dIn === null) next.dIn = input.dIn;
+  if (typeof input.hIn === "number" || input.hIn === null) next.hIn = input.hIn;
+  const hasValue = [next.wIn, next.dIn, next.hIn].some((v) => typeof v === "number");
+  return hasValue ? next : undefined;
+}
+
 export default function ItemDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -74,9 +143,11 @@ export default function ItemDetail() {
     createItem,
     updateItem,
     deleteItem,
+    convertItemToOption,
     createOption,
     updateOption,
     deleteOption,
+    sortAndFilterOptions,
   } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
@@ -119,6 +190,80 @@ export default function ItemDetail() {
   const [newSpecKey, setNewSpecKey] = useState("");
   const [newSpecVal, setNewSpecVal] = useState("");
   const [duplicateBusy, setDuplicateBusy] = useState(false);
+  const [optSortKey, setOptSortKey] = useState<"price" | "priority" | "name">("price");
+  const [optSortDir, setOptSortDir] = useState<"asc" | "desc">("asc");
+  const [optMinPrice, setOptMinPrice] = useState("");
+  const [optMaxPrice, setOptMaxPrice] = useState("");
+  const [compareOpen, setCompareOpen] = useState(false);
+  const [optionPage, setOptionPage] = useState(1);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importQuery, setImportQuery] = useState("");
+  const [importSelectedId, setImportSelectedId] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [optionSpecDrafts, setOptionSpecDrafts] = useState<Record<string, { key: string; value: string }>>({});
+
+  const filteredOptions = useMemo(() => {
+    if (!item) return [];
+    return sortAndFilterOptions(item.id, {
+      sortKey: optSortKey,
+      sortDir: optSortDir,
+      minPrice: parseNumberOrNull(optMinPrice),
+      maxPrice: parseNumberOrNull(optMaxPrice),
+    });
+  }, [item, optSortKey, optSortDir, optMinPrice, optMaxPrice, sortAndFilterOptions]);
+
+  const pageSize = 20;
+  const totalPages = Math.max(1, Math.ceil(filteredOptions.length / pageSize));
+  const pagedOptions = useMemo(() => {
+    const start = (optionPage - 1) * pageSize;
+    return filteredOptions.slice(start, start + pageSize);
+  }, [filteredOptions, optionPage]);
+
+  const selectedOptionId = useMemo(() => {
+    if (!item) return null;
+    return item.selectedOptionId || itemOptions.find((o) => o.selected)?.id || null;
+  }, [item, itemOptions]);
+
+  const bestOptionId = useMemo(() => pickBestOptionId(filteredOptions), [filteredOptions]);
+
+  const importedSourceItemIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const opt of options) {
+      if (opt.syncState === "deleted") continue;
+      if (opt.sourceItemId) set.add(opt.sourceItemId);
+    }
+    return set;
+  }, [options]);
+
+  const existingParentLinks = useMemo(() => {
+    const set = new Set<string>();
+    for (const opt of itemOptions) {
+      const link = normalizeLink(opt.link || "");
+      if (link) set.add(link);
+    }
+    return set;
+  }, [itemOptions]);
+
+  const importCandidates = useMemo(() => {
+    if (!item) return [];
+    const needle = importQuery.trim().toLowerCase();
+    return items
+      .filter((i) => i.syncState !== "deleted")
+      .filter((i) => i.id !== item.id)
+      .filter((i) => !importedSourceItemIds.has(i.id))
+      .filter((i) => {
+        const link = normalizeLink(i.link || "");
+        if (link && existingParentLinks.has(link)) return false;
+        return true;
+      })
+      .filter((i) => {
+        if (!needle) return true;
+        const tagBlob = Array.isArray(i.tags) ? i.tags.join(" ") : "";
+        const blob = `${i.name} ${i.store || ""} ${i.category || ""} ${i.notes || ""} ${tagBlob}`;
+        return includesText(blob, needle);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [existingParentLinks, importQuery, importedSourceItemIds, item, items]);
 
   const roomMeasurements = useMemo(() => {
     return measurements.filter((m) => m.syncState !== "deleted" && m.room === item?.room);
@@ -147,7 +292,7 @@ export default function ItemDetail() {
     setDataSource(item.provenance?.dataSource ?? null);
     setSourceRef(item.provenance?.sourceRef || "");
     setReviewStatus(item.provenance?.reviewStatus ?? null);
-  }, [item?.id]);
+  }, [item]);
 
   useEffect(() => {
     if (!item) return;
@@ -187,6 +332,14 @@ export default function ItemDetail() {
       active = false;
     };
   }, [itemOptions]);
+
+  useEffect(() => {
+    setOptionPage(1);
+  }, [item?.id, optSortKey, optSortDir, optMinPrice, optMaxPrice]);
+
+  useEffect(() => {
+    if (optionPage > totalPages) setOptionPage(totalPages);
+  }, [optionPage, totalPages]);
 
   async function commit(patch: Partial<Item>) {
     await updateItem(item.id, patch);
@@ -235,6 +388,7 @@ export default function ItemDetail() {
         link: item.link ?? null,
         notes: item.notes ?? null,
         priority: item.priority ?? null,
+        tags: item.tags ? [...item.tags] : null,
         dimensions: item.dimensions ? { ...item.dimensions } : undefined,
         specs: item.specs ? { ...item.specs } : null,
       });
@@ -267,7 +421,11 @@ export default function ItemDetail() {
           taxEstimate: opt.taxEstimate ?? null,
           discount: opt.discount ?? null,
           dimensionsText: opt.dimensionsText ?? null,
+          dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
+          specs: opt.specs ? { ...opt.specs } : null,
           notes: opt.notes ?? null,
+          priority: opt.priority ?? null,
+          tags: opt.tags ? [...opt.tags] : null,
           selected: Boolean(opt.selected),
         });
         optionIdMap.set(opt.id, newOptId);
@@ -344,6 +502,22 @@ export default function ItemDetail() {
     await createOption({ itemId: item.id, title });
   }
 
+  async function onImportExistingItem() {
+    if (!item || !importSelectedId || importBusy) return;
+    setImportBusy(true);
+    try {
+      await convertItemToOption(item.id, importSelectedId);
+      toast({ title: "Imported", description: "Imported as option and removed from room list." });
+      setImportOpen(false);
+      setImportSelectedId(null);
+      setImportQuery("");
+    } catch (err: any) {
+      toast({ title: "Import failed", description: err?.message || "Could not import item." });
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   async function refreshAttachments(parentType: "item" | "option", parentId: string) {
     const rows = await listAttachments(parentType, parentId);
     if (parentType === "item") {
@@ -389,13 +563,20 @@ export default function ItemDetail() {
     ]);
     const chosen = itemOptions.find((o) => o.id === optionId);
     if (chosen) {
-      const final = optionFinalTotal(chosen);
-      await commit({
+      const final = optionTotalOrNull(chosen);
+      const next: Partial<Item> = {
         status: "Selected",
+        selectedOptionId: chosen.id,
+        name: chosen.title || item.name,
         store: chosen.store ?? null,
         link: chosen.link ?? null,
-        price: final || null,
-      });
+        price: final ?? null,
+        priority: typeof chosen.priority === "number" ? chosen.priority : null,
+        tags: chosen.tags ? [...chosen.tags] : null,
+        dimensions: chosen.dimensions ? { ...chosen.dimensions } : undefined,
+        specs: chosen.specs ? { ...chosen.specs } : null,
+      };
+      await commit(next);
     } else {
       await commit({ status: "Selected" });
     }
@@ -896,14 +1077,75 @@ export default function ItemDetail() {
       </Card>
 
       <Card className="p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-sm font-semibold">Options</div>
-            <div className="text-xs text-muted-foreground">Track candidates, then tap Select to set the item.</div>
+            <div className="text-xs text-muted-foreground">Track candidates, compare, then select a winner.</div>
           </div>
-          <Button variant="secondary" onClick={() => void onAddOption()}>
-            + Add option
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="secondary" onClick={() => setCompareOpen(true)} disabled={!itemOptions.length}>
+              Compare options
+            </Button>
+            <Button variant="secondary" onClick={() => setImportOpen(true)}>
+              Add existing Item as Option
+            </Button>
+            <Button variant="secondary" onClick={() => void onAddOption()}>
+              + Add option
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="space-y-1.5">
+            <Label>Sort by</Label>
+            <select
+              value={`${optSortKey}:${optSortDir}`}
+              onChange={(e) => {
+                const [key, dir] = e.target.value.split(":");
+                if (key === "price") {
+                  setOptSortKey("price");
+                  setOptSortDir(dir === "desc" ? "desc" : "asc");
+                } else if (key === "priority") {
+                  setOptSortKey("priority");
+                  setOptSortDir("asc");
+                } else {
+                  setOptSortKey("name");
+                  setOptSortDir("asc");
+                }
+              }}
+              className="h-11 w-full rounded-md border bg-background px-3 text-base"
+            >
+              <option value="price:asc">Price (Low to High)</option>
+              <option value="price:desc">Price (High to Low)</option>
+              <option value="priority:asc">Priority</option>
+              <option value="name:asc">Name</option>
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Min price</Label>
+            <Input
+              inputMode="decimal"
+              value={optMinPrice}
+              onChange={(e) => setOptMinPrice(e.target.value)}
+              placeholder="$"
+              className="h-11 text-base"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Max price</Label>
+            <Input
+              inputMode="decimal"
+              value={optMaxPrice}
+              onChange={(e) => setOptMaxPrice(e.target.value)}
+              placeholder="$"
+              className="h-11 text-base"
+            />
+          </div>
+          <div className="flex items-end">
+            <div className="text-xs text-muted-foreground">
+              Showing {reorderMode ? itemOptions.length : filteredOptions.length} option{(reorderMode ? itemOptions.length : filteredOptions.length) === 1 ? "" : "s"}
+            </div>
+          </div>
         </div>
 
         <div className="mt-3 space-y-3">
@@ -927,232 +1169,423 @@ export default function ItemDetail() {
                 await reorderOptions(item.id, ids);
               }}
             />
-          ) : itemOptions.length ? (
-            itemOptions.map((o) => {
-              const final = optionFinalTotal(o);
-              const modifiedFields = Array.isArray(o.provenance?.modifiedFields) ? o.provenance.modifiedFields : [];
-              return (
-                <Card key={o.id} className="p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 text-left"
-                      onClick={() => setOpenOpt((cur) => ({ ...cur, [o.id]: !cur[o.id] }))}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="truncate text-base font-semibold">{o.title}</div>
-                        {final ? (
-                          <div className="shrink-0 text-sm font-semibold">{formatMoneyUSD(final)}</div>
-                        ) : (
-                          <div className="shrink-0 text-xs text-muted-foreground">no total</div>
-                        )}
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <ReviewStatusBadge status={o.provenance?.reviewStatus} />
-                        <DataSourceBadge dataSource={o.provenance?.dataSource} />
-                        {modifiedFields.length ? (
-                          <span className="text-xs text-muted-foreground">
-                            Changed: {modifiedFields.slice(0, 4).join(", ")}
-                            {modifiedFields.length > 4 ? ` +${modifiedFields.length - 4}` : ""}
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                        {o.store ? <span>{o.store}</span> : null}
-                        {o.price ? <span>price {formatMoneyUSD(o.price)}</span> : null}
-                        {o.shipping ? <span>ship {formatMoneyUSD(o.shipping)}</span> : null}
-                        {o.taxEstimate ? <span>tax {formatMoneyUSD(o.taxEstimate)}</span> : null}
-                        {o.discount ? <span>disc -{formatMoneyUSD(o.discount)}</span> : null}
-                        {o.selected ? <span className="font-semibold text-foreground">selected</span> : null}
-                      </div>
-                    </button>
-
-                    <div className="flex shrink-0 flex-col gap-2">
-                      <Button variant={o.selected ? "default" : "secondary"} onClick={() => void onSelectOption(o.id)}>
-                        {o.selected ? "Selected" : "Select"}
-                      </Button>
-                      <Button variant="secondary" onClick={() => void onShareOption(o)}>
-                        Share
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        onClick={() => setOpenOpt((cur) => ({ ...cur, [o.id]: !cur[o.id] }))}
-                      >
-                        {openOpt[o.id] ? "Hide" : "Edit"}
-                      </Button>
-                      <Button variant="destructive" onClick={() => void onDeleteOption(o)}>
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-
-                  {openOpt[o.id] ? (
-                    <div className="mt-4 space-y-3 border-t pt-4">
-                      <div className="space-y-1.5">
-                        <Label>Title</Label>
-                        <Input
-                          defaultValue={o.title}
-                          className="h-11 text-base"
-                          onBlur={(e) => void updateOption(o.id, { title: e.target.value.trim() || "Option" })}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>Data source</Label>
-                          <select
-                            value={o.provenance?.dataSource || ""}
-                            onChange={(e) => void updateOption(o.id, { provenance: { dataSource: (e.target.value as DataSource) || null } })}
-                            className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                          >
-                            <option value="">(none)</option>
-                            <option value="concrete">Concrete</option>
-                            <option value="estimated">Estimated</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Review status</Label>
-                          <select
-                            value={o.provenance?.reviewStatus || ""}
-                            onChange={(e) => {
-                              const v = (e.target.value as ReviewStatus) || null;
-                              const at = nowMs();
-                              if (v === "verified") void updateOption(o.id, { provenance: markProvenanceVerified(o.provenance, at) });
-                              else if (v === "needs_review") void updateOption(o.id, { provenance: markProvenanceNeedsReview(o.provenance, at) });
-                              else void updateOption(o.id, { provenance: { reviewStatus: v } });
-                            }}
-                            className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                          >
-                            <option value="">(none)</option>
-                            <option value="needs_review">Needs review</option>
-                            <option value="verified">Verified</option>
-                            <option value="ai_modified">AI modified</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label>Source ref</Label>
-                        <Input
-                          defaultValue={o.provenance?.sourceRef || ""}
-                          className="h-11 text-base"
-                          placeholder='e.g. "Vendor PDF"'
-                          onBlur={(e) => void updateOption(o.id, { provenance: { sourceRef: e.target.value.trim() || null } })}
-                        />
-                      </div>
-
-                      {modifiedFields.length ? (
-                        <div className="text-xs text-muted-foreground">
-                          Changed: {modifiedFields.slice(0, 6).join(", ")}
-                          {modifiedFields.length > 6 ? ` +${modifiedFields.length - 6}` : ""}
-                        </div>
-                      ) : null}
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>Store</Label>
-                          <Input
-                            defaultValue={o.store || ""}
-                            className="h-11 text-base"
-                            onBlur={(e) => void updateOption(o.id, { store: e.target.value.trim() || null })}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Promo code</Label>
-                          <Input
-                            defaultValue={o.promoCode || ""}
-                            className="h-11 text-base"
-                            onBlur={(e) => void updateOption(o.id, { promoCode: e.target.value.trim() || null })}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label>Link</Label>
-                        <Input
-                          defaultValue={o.link || ""}
-                          className="h-11 text-base"
-                          placeholder="https://"
-                          onBlur={(e) => void updateOption(o.id, { link: e.target.value.trim() || null })}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>Price</Label>
-                          <Input
-                            inputMode="decimal"
-                            defaultValue={o.price === null || o.price === undefined ? "" : String(o.price)}
-                            className="h-11 text-base"
-                            onBlur={(e) => void updateOption(o.id, { price: parseNumberOrNull(e.target.value) })}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Shipping</Label>
-                          <Input
-                            inputMode="decimal"
-                            defaultValue={o.shipping === null || o.shipping === undefined ? "" : String(o.shipping)}
-                            className="h-11 text-base"
-                            onBlur={(e) => void updateOption(o.id, { shipping: parseNumberOrNull(e.target.value) })}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                          <Label>Tax estimate</Label>
-                          <Input
-                            inputMode="decimal"
-                            defaultValue={o.taxEstimate === null || o.taxEstimate === undefined ? "" : String(o.taxEstimate)}
-                            className="h-11 text-base"
-                            onBlur={(e) => void updateOption(o.id, { taxEstimate: parseNumberOrNull(e.target.value) })}
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Discount</Label>
-                          <Input
-                            inputMode="decimal"
-                            defaultValue={o.discount === null || o.discount === undefined ? "" : String(o.discount)}
-                            className="h-11 text-base"
-                            onBlur={(e) => void updateOption(o.id, { discount: parseNumberOrNull(e.target.value) })}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label>Dimensions (text)</Label>
-                        <Input
-                          defaultValue={o.dimensionsText || ""}
-                          className="h-11 text-base"
-                          placeholder='e.g. "90x39x34 in"'
-                          onBlur={(e) => void updateOption(o.id, { dimensionsText: e.target.value.trim() || null })}
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label>Notes</Label>
-                        <Textarea
-                          defaultValue={o.notes || ""}
-                          className="min-h-[92px] text-base"
-                          onBlur={(e) => void updateOption(o.id, { notes: e.target.value.trim() || null })}
-                        />
-                      </div>
-
-                      <AttachmentGallery
-                        label="Option photos"
-                        attachments={optionAttachments[o.id] || []}
-                        onAdd={(files) => void handleAddAttachments("option", o.id, files)}
-                        onRemove={(attId) => void handleRemoveAttachment("option", o.id, attId)}
-                      />
-                    </div>
-                  ) : null}
-                </Card>
-              );
-            })
           ) : (
-            <div className="text-sm text-muted-foreground">No options yet. Add candidates as you shop.</div>
+            <div className="max-h-[520px] overflow-y-auto pr-1">
+              <div className="space-y-3">
+                {(reorderMode ? itemOptions : pagedOptions).length ? (
+                  (reorderMode ? itemOptions : pagedOptions).map((o) => {
+                    const total = optionTotalOrNull(o);
+                    const final = total ?? 0;
+                    const modifiedFields = Array.isArray(o.provenance?.modifiedFields) ? o.provenance.modifiedFields : [];
+                    const isSelected = selectedOptionId === o.id || o.selected;
+                    const isBest = bestOptionId === o.id;
+                    const specDraft = optionSpecDrafts[o.id] || { key: "", value: "" };
+                    return (
+                      <Card key={o.id} className={["p-3", isBest ? "border-emerald-200/80 bg-emerald-50/40" : ""].join(" ")}>
+                        <div className="flex items-start justify-between gap-3">
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 text-left"
+                            onClick={() => setOpenOpt((cur) => ({ ...cur, [o.id]: !cur[o.id] }))}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="truncate text-base font-semibold">{o.title}</div>
+                                  {isSelected ? <Badge>Selected</Badge> : null}
+                                  {isBest ? <Badge variant="secondary">Top pick</Badge> : null}
+                                </div>
+                              </div>
+                              {total !== null ? (
+                                <div className="shrink-0 text-sm font-semibold">{formatMoneyUSD(final)}</div>
+                              ) : (
+                                <div className="shrink-0 text-xs text-muted-foreground">no total</div>
+                              )}
+                            </div>
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <ReviewStatusBadge status={o.provenance?.reviewStatus} />
+                              <DataSourceBadge dataSource={o.provenance?.dataSource} />
+                              {modifiedFields.length ? (
+                                <span className="text-xs text-muted-foreground">
+                                  Changed: {modifiedFields.slice(0, 4).join(", ")}
+                                  {modifiedFields.length > 4 ? ` +${modifiedFields.length - 4}` : ""}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                              {o.store ? <span>{o.store}</span> : null}
+                              {typeof o.priority === "number" ? <span>priority {o.priority}</span> : null}
+                              {formatDimensions(o) !== "-" ? <span>{formatDimensions(o)}</span> : null}
+                              {o.price ? <span>price {formatMoneyUSD(o.price)}</span> : null}
+                              {o.shipping ? <span>ship {formatMoneyUSD(o.shipping)}</span> : null}
+                              {o.taxEstimate ? <span>tax {formatMoneyUSD(o.taxEstimate)}</span> : null}
+                              {o.discount ? <span>disc -{formatMoneyUSD(o.discount)}</span> : null}
+                            </div>
+                          </button>
+
+                          <div className="flex shrink-0 flex-col gap-2">
+                            <Button variant={isSelected ? "default" : "secondary"} onClick={() => void onSelectOption(o.id)}>
+                              {isSelected ? "Selected" : "Select"}
+                            </Button>
+                            <Button variant="secondary" onClick={() => void onShareOption(o)}>
+                              Share
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              onClick={() => setOpenOpt((cur) => ({ ...cur, [o.id]: !cur[o.id] }))}
+                            >
+                              {openOpt[o.id] ? "Hide" : "Edit"}
+                            </Button>
+                            <Button variant="destructive" onClick={() => void onDeleteOption(o)}>
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
+
+                        {openOpt[o.id] ? (
+                          <div className="mt-4 space-y-3 border-t pt-4">
+                            <div className="space-y-1.5">
+                              <Label>Title</Label>
+                              <Input
+                                defaultValue={o.title}
+                                className="h-11 text-base"
+                                onBlur={(e) => void updateOption(o.id, { title: e.target.value.trim() || "Option" })}
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <Label>Data source</Label>
+                                <select
+                                  value={o.provenance?.dataSource || ""}
+                                  onChange={(e) =>
+                                    void updateOption(o.id, { provenance: { dataSource: (e.target.value as DataSource) || null } })
+                                  }
+                                  className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                                >
+                                  <option value="">(none)</option>
+                                  <option value="concrete">Concrete</option>
+                                  <option value="estimated">Estimated</option>
+                                </select>
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label>Review status</Label>
+                                <select
+                                  value={o.provenance?.reviewStatus || ""}
+                                  onChange={(e) => {
+                                    const v = (e.target.value as ReviewStatus) || null;
+                                    const at = nowMs();
+                                    if (v === "verified") void updateOption(o.id, { provenance: markProvenanceVerified(o.provenance, at) });
+                                    else if (v === "needs_review")
+                                      void updateOption(o.id, { provenance: markProvenanceNeedsReview(o.provenance, at) });
+                                    else void updateOption(o.id, { provenance: { reviewStatus: v } });
+                                  }}
+                                  className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                                >
+                                  <option value="">(none)</option>
+                                  <option value="needs_review">Needs review</option>
+                                  <option value="verified">Verified</option>
+                                  <option value="ai_modified">AI modified</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label>Source ref</Label>
+                              <Input
+                                defaultValue={o.provenance?.sourceRef || ""}
+                                className="h-11 text-base"
+                                placeholder='e.g. "Vendor PDF"'
+                                onBlur={(e) => void updateOption(o.id, { provenance: { sourceRef: e.target.value.trim() || null } })}
+                              />
+                            </div>
+
+                            {modifiedFields.length ? (
+                              <div className="text-xs text-muted-foreground">
+                                Changed: {modifiedFields.slice(0, 6).join(", ")}
+                                {modifiedFields.length > 6 ? ` +${modifiedFields.length - 6}` : ""}
+                              </div>
+                            ) : null}
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <Label>Priority (1-5)</Label>
+                                <Input
+                                  inputMode="numeric"
+                                  defaultValue={o.priority === null || o.priority === undefined ? "" : String(o.priority)}
+                                  className="h-11 text-base"
+                                  onBlur={(e) => {
+                                    const p = parseNumberOrNull(e.target.value);
+                                    void updateOption(o.id, { priority: p === null ? null : Math.max(1, Math.min(5, Math.round(p))) });
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label>Tags</Label>
+                                <Input
+                                  defaultValue={(o.tags || []).join(", ")}
+                                  className="h-11 text-base"
+                                  placeholder="e.g. king, mattress"
+                                  onBlur={(e) => {
+                                    const tags = e.target.value
+                                      .split(",")
+                                      .map((t) => t.trim())
+                                      .filter(Boolean);
+                                    void updateOption(o.id, { tags: tags.length ? tags : null });
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <Label>Store</Label>
+                                <Input
+                                  defaultValue={o.store || ""}
+                                  className="h-11 text-base"
+                                  onBlur={(e) => void updateOption(o.id, { store: e.target.value.trim() || null })}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label>Promo code</Label>
+                                <Input
+                                  defaultValue={o.promoCode || ""}
+                                  className="h-11 text-base"
+                                  onBlur={(e) => void updateOption(o.id, { promoCode: e.target.value.trim() || null })}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label>Link</Label>
+                              <Input
+                                defaultValue={o.link || ""}
+                                className="h-11 text-base"
+                                placeholder="https://"
+                                onBlur={(e) => void updateOption(o.id, { link: e.target.value.trim() || null })}
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <Label>Price</Label>
+                                <Input
+                                  inputMode="decimal"
+                                  defaultValue={o.price === null || o.price === undefined ? "" : String(o.price)}
+                                  className="h-11 text-base"
+                                  onBlur={(e) => void updateOption(o.id, { price: parseNumberOrNull(e.target.value) })}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label>Shipping</Label>
+                                <Input
+                                  inputMode="decimal"
+                                  defaultValue={o.shipping === null || o.shipping === undefined ? "" : String(o.shipping)}
+                                  className="h-11 text-base"
+                                  onBlur={(e) => void updateOption(o.id, { shipping: parseNumberOrNull(e.target.value) })}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <Label>Tax estimate</Label>
+                                <Input
+                                  inputMode="decimal"
+                                  defaultValue={o.taxEstimate === null || o.taxEstimate === undefined ? "" : String(o.taxEstimate)}
+                                  className="h-11 text-base"
+                                  onBlur={(e) => void updateOption(o.id, { taxEstimate: parseNumberOrNull(e.target.value) })}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label>Discount</Label>
+                                <Input
+                                  inputMode="decimal"
+                                  defaultValue={o.discount === null || o.discount === undefined ? "" : String(o.discount)}
+                                  className="h-11 text-base"
+                                  onBlur={(e) => void updateOption(o.id, { discount: parseNumberOrNull(e.target.value) })}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label>Dimensions (in)</Label>
+                              <div className="grid grid-cols-3 gap-3">
+                                <Input
+                                  inputMode="decimal"
+                                  defaultValue={o.dimensions?.wIn === null || o.dimensions?.wIn === undefined ? "" : String(o.dimensions?.wIn)}
+                                  placeholder="W"
+                                  className="h-11 text-base"
+                                  onBlur={(e) => {
+                                    const next = normalizeDimensionsInput({
+                                      wIn: parseNumberOrNull(e.target.value),
+                                      dIn: o.dimensions?.dIn ?? null,
+                                      hIn: o.dimensions?.hIn ?? null,
+                                    });
+                                    void updateOption(o.id, { dimensions: next });
+                                  }}
+                                />
+                                <Input
+                                  inputMode="decimal"
+                                  defaultValue={o.dimensions?.dIn === null || o.dimensions?.dIn === undefined ? "" : String(o.dimensions?.dIn)}
+                                  placeholder="D"
+                                  className="h-11 text-base"
+                                  onBlur={(e) => {
+                                    const next = normalizeDimensionsInput({
+                                      wIn: o.dimensions?.wIn ?? null,
+                                      dIn: parseNumberOrNull(e.target.value),
+                                      hIn: o.dimensions?.hIn ?? null,
+                                    });
+                                    void updateOption(o.id, { dimensions: next });
+                                  }}
+                                />
+                                <Input
+                                  inputMode="decimal"
+                                  defaultValue={o.dimensions?.hIn === null || o.dimensions?.hIn === undefined ? "" : String(o.dimensions?.hIn)}
+                                  placeholder="H"
+                                  className="h-11 text-base"
+                                  onBlur={(e) => {
+                                    const next = normalizeDimensionsInput({
+                                      wIn: o.dimensions?.wIn ?? null,
+                                      dIn: o.dimensions?.dIn ?? null,
+                                      hIn: parseNumberOrNull(e.target.value),
+                                    });
+                                    void updateOption(o.id, { dimensions: next });
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label>Dimensions (text)</Label>
+                              <Input
+                                defaultValue={o.dimensionsText || ""}
+                                className="h-11 text-base"
+                                placeholder='e.g. "90x39x34 in"'
+                                onBlur={(e) => void updateOption(o.id, { dimensionsText: e.target.value.trim() || null })}
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Specs</Label>
+                              {o.specs && typeof o.specs === "object" && Object.keys(o.specs).length ? (
+                                Object.entries(o.specs)
+                                  .sort((a, b) => a[0].localeCompare(b[0]))
+                                  .map(([k, v]) => (
+                                    <div key={k} className="grid grid-cols-12 gap-2">
+                                      <Input value={k} readOnly className="col-span-5 h-11 text-base" />
+                                      <Input
+                                        defaultValue={v === null || typeof v === "undefined" ? "" : String(v)}
+                                        className="col-span-6 h-11 text-base"
+                                        onBlur={(e) => {
+                                          const next = o.specs && typeof o.specs === "object" ? { ...o.specs } : {};
+                                          (next as any)[k] = parseSpecValue(e.target.value);
+                                          void updateOption(o.id, { specs: next });
+                                        }}
+                                      />
+                                      <Button
+                                        variant="secondary"
+                                        className="col-span-1 h-11 px-0"
+                                        onClick={() => {
+                                          const next = o.specs && typeof o.specs === "object" ? { ...o.specs } : {};
+                                          delete (next as any)[k];
+                                          void updateOption(o.id, { specs: Object.keys(next).length ? next : null });
+                                        }}
+                                        aria-label={`Remove spec ${k}`}
+                                      >
+                                        &times;
+                                      </Button>
+                                    </div>
+                                  ))
+                              ) : (
+                                <div className="text-xs text-muted-foreground">No specs yet.</div>
+                              )}
+
+                              <div className="grid grid-cols-12 gap-2">
+                                <Input
+                                  value={specDraft.key}
+                                  onChange={(e) =>
+                                    setOptionSpecDrafts((cur) => ({
+                                      ...cur,
+                                      [o.id]: { ...(cur[o.id] || { key: "", value: "" }), key: e.target.value },
+                                    }))
+                                  }
+                                  placeholder="key (e.g. size)"
+                                  className="col-span-5 h-11 text-base"
+                                />
+                                <Input
+                                  value={specDraft.value}
+                                  onChange={(e) =>
+                                    setOptionSpecDrafts((cur) => ({
+                                      ...cur,
+                                      [o.id]: { ...(cur[o.id] || { key: "", value: "" }), value: e.target.value },
+                                    }))
+                                  }
+                                  placeholder="value (e.g. King)"
+                                  className="col-span-6 h-11 text-base"
+                                />
+                                <Button
+                                  className="col-span-1 h-11 px-0"
+                                  onClick={() => {
+                                    const key = specDraft.key.trim();
+                                    if (!key) return;
+                                    const next = o.specs && typeof o.specs === "object" ? { ...o.specs } : {};
+                                    (next as any)[key] = parseSpecValue(specDraft.value);
+                                    void updateOption(o.id, { specs: next });
+                                    setOptionSpecDrafts((cur) => ({ ...cur, [o.id]: { key: "", value: "" } }));
+                                  }}
+                                  aria-label="Add spec"
+                                >
+                                  +
+                                </Button>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1.5">
+                              <Label>Notes</Label>
+                              <Textarea
+                                defaultValue={o.notes || ""}
+                                className="min-h-[92px] text-base"
+                                onBlur={(e) => void updateOption(o.id, { notes: e.target.value.trim() || null })}
+                              />
+                            </div>
+
+                            <AttachmentGallery
+                              label="Option photos"
+                              attachments={optionAttachments[o.id] || []}
+                              onAdd={(files) => void handleAddAttachments("option", o.id, files)}
+                              onRemove={(attId) => void handleRemoveAttachment("option", o.id, attId)}
+                            />
+                          </div>
+                        ) : null}
+                      </Card>
+                    );
+                  })
+                ) : itemOptions.length ? (
+                  <div className="text-sm text-muted-foreground">No options match the current filters.</div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">No options yet. Add candidates as you shop.</div>
+                )}
+              </div>
+            </div>
           )}
         </div>
+
+        {!reorderMode && totalPages > 1 ? (
+          <div className="mt-3 flex items-center justify-between">
+            <div className="text-xs text-muted-foreground">
+              Page {optionPage} of {totalPages}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="secondary" size="sm" onClick={() => setOptionPage((p) => Math.max(1, p - 1))} disabled={optionPage <= 1}>
+                Prev
+              </Button>
+              <Button variant="secondary" size="sm" onClick={() => setOptionPage((p) => Math.min(totalPages, p + 1))} disabled={optionPage >= totalPages}>
+                Next
+              </Button>
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-3">
           <Button
@@ -1165,6 +1598,149 @@ export default function ItemDetail() {
           </Button>
         </div>
       </Card>
+
+      <Dialog
+        open={importOpen}
+        onOpenChange={(open) => {
+          setImportOpen(open);
+          if (!open) {
+            setImportSelectedId(null);
+            setImportQuery("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Import existing item</DialogTitle>
+            <DialogDescription>Select a standalone item to import as an option. The original item will be removed from its room list.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={importQuery}
+              onChange={(e) => setImportQuery(e.target.value)}
+              placeholder="Search by title, store, tags..."
+              className="h-11 text-base"
+            />
+            <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1">
+              {importCandidates.length ? (
+                importCandidates.map((candidate) => {
+                  const isSelected = importSelectedId === candidate.id;
+                  return (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      onClick={() => setImportSelectedId(candidate.id)}
+                      className={[
+                        "w-full rounded-md border px-3 py-2 text-left transition",
+                        isSelected ? "border-foreground bg-secondary/60" : "hover:border-foreground/60",
+                      ].join(" ")}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium">{candidate.name}</div>
+                        {typeof candidate.price === "number" ? (
+                          <div className="text-sm font-semibold">{formatMoneyUSD(candidate.price)}</div>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {candidate.store ? `${candidate.store} · ` : ""}
+                        {roomNameById.get(candidate.room) || candidate.room}
+                        {candidate.category ? ` · ${candidate.category}` : ""}
+                      </div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="text-sm text-muted-foreground">No matching items to import.</div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setImportOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void onImportExistingItem()} disabled={!importSelectedId || importBusy}>
+              {importBusy ? "Importing..." : "Import as option"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Compare options</DialogTitle>
+            <DialogDescription>Compare key fields and pick a winner. Filters apply to the comparison set.</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-auto rounded-lg border">
+            <table className="min-w-full text-sm">
+              <thead className="bg-muted/50 text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2">Title</th>
+                  <th className="px-3 py-2">Price</th>
+                  <th className="px-3 py-2">Dimensions</th>
+                  <th className="px-3 py-2">Store</th>
+                  <th className="px-3 py-2">Link</th>
+                  <th className="px-3 py-2">Specs</th>
+                  <th className="px-3 py-2">Priority</th>
+                  <th className="px-3 py-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOptions.length ? (
+                  filteredOptions.map((o) => {
+                    const total = optionTotalOrNull(o);
+                    const isSelected = selectedOptionId === o.id || o.selected;
+                    const isBest = bestOptionId === o.id;
+                    return (
+                      <tr
+                        key={o.id}
+                        className={[
+                          "border-t",
+                          isSelected ? "bg-primary/10" : "",
+                          !isSelected && isBest ? "bg-emerald-50/60" : "",
+                        ].join(" ")}
+                      >
+                        <td className="px-3 py-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{o.title}</span>
+                            {isSelected ? <Badge>Selected</Badge> : null}
+                            {isBest ? <Badge variant="secondary">Top pick</Badge> : null}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">{total === null ? "-" : formatMoneyUSD(total)}</td>
+                        <td className="px-3 py-2">{formatDimensions(o)}</td>
+                        <td className="px-3 py-2">{o.store || "-"}</td>
+                        <td className="px-3 py-2">
+                          {o.link ? (
+                            <a href={o.link} target="_blank" rel="noreferrer" className="text-primary underline">
+                              Link
+                            </a>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="px-3 py-2">{formatSpecs(o.specs)}</td>
+                        <td className="px-3 py-2">{typeof o.priority === "number" ? o.priority : "-"}</td>
+                        <td className="px-3 py-2 text-right">
+                          <Button size="sm" variant={isSelected ? "default" : "secondary"} onClick={() => void onSelectOption(o.id)}>
+                            Select this option
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td className="px-3 py-4 text-center text-sm text-muted-foreground" colSpan={8}>
+                      No options to compare.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

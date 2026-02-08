@@ -27,6 +27,15 @@ export function normalizeOptionalNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+export function normalizeStringArray(value: unknown): string {
+  if (!Array.isArray(value)) return "";
+  const cleaned = value
+    .map((v) => String(v ?? "").trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return cleaned.join("|");
+}
+
 export function normalizeBoolean(value: unknown): boolean {
   return Boolean(value);
 }
@@ -59,6 +68,7 @@ export const ITEM_TRACKED_FIELDS: TrackedFieldSpec<Item>[] = [
   { field: "room", get: (i) => i.room, normalize: normalizeString },
   { field: "category", get: (i) => i.category, normalize: normalizeString },
   { field: "status", get: (i) => i.status, normalize: normalizeString },
+  { field: "selectedOptionId", get: (i) => i.selectedOptionId, normalize: normalizeOptionalString },
   { field: "sort", get: (i) => i.sort, normalize: normalizeOptionalNumber },
   { field: "price", get: (i) => i.price, normalize: normalizeOptionalNumber },
   { field: "qty", get: (i) => i.qty, normalize: normalizeOptionalNumber },
@@ -66,6 +76,7 @@ export const ITEM_TRACKED_FIELDS: TrackedFieldSpec<Item>[] = [
   { field: "link", get: (i) => i.link, normalize: normalizeOptionalString },
   { field: "notes", get: (i) => i.notes, normalize: normalizeOptionalString },
   { field: "priority", get: (i) => i.priority, normalize: normalizeOptionalNumber },
+  { field: "tags", get: (i) => i.tags, normalize: normalizeStringArray },
   { field: "dimensions.wIn", get: (i) => i.dimensions?.wIn, normalize: normalizeOptionalNumber },
   { field: "dimensions.hIn", get: (i) => i.dimensions?.hIn, normalize: normalizeOptionalNumber },
   { field: "dimensions.dIn", get: (i) => i.dimensions?.dIn, normalize: normalizeOptionalNumber },
@@ -86,8 +97,14 @@ export const OPTION_TRACKED_FIELDS: TrackedFieldSpec<Option>[] = [
   { field: "taxEstimate", get: (o) => o.taxEstimate, normalize: normalizeOptionalNumber },
   { field: "discount", get: (o) => o.discount, normalize: normalizeOptionalNumber },
   { field: "dimensionsText", get: (o) => o.dimensionsText, normalize: normalizeOptionalString },
+  { field: "dimensions.wIn", get: (o) => o.dimensions?.wIn, normalize: normalizeOptionalNumber },
+  { field: "dimensions.hIn", get: (o) => o.dimensions?.hIn, normalize: normalizeOptionalNumber },
+  { field: "dimensions.dIn", get: (o) => o.dimensions?.dIn, normalize: normalizeOptionalNumber },
   { field: "notes", get: (o) => o.notes, normalize: normalizeOptionalString },
+  { field: "priority", get: (o) => o.priority, normalize: normalizeOptionalNumber },
+  { field: "tags", get: (o) => o.tags, normalize: normalizeStringArray },
   { field: "selected", get: (o) => o.selected, normalize: normalizeBoolean },
+  { field: "sourceItemId", get: (o) => o.sourceItemId, normalize: normalizeOptionalString },
   { field: "provenance.dataSource", get: (o) => o.provenance?.dataSource, normalize: normalizeDataSource },
   { field: "provenance.sourceRef", get: (o) => o.provenance?.sourceRef, normalize: normalizeOptionalString },
 ];
