@@ -250,6 +250,20 @@ export default function ItemDetail() {
 
   const bestOptionId = useMemo(() => pickBestOptionId(filteredOptions), [filteredOptions]);
 
+  const optionsToRender = useMemo(() => {
+    if (optionOnlyOption) return [optionOnlyOption];
+    return reorderMode ? itemOptions : pagedOptions;
+  }, [itemOptions, optionOnlyOption, pagedOptions, reorderMode]);
+
+  const optionsCount = optionOnly ? 1 : reorderMode ? itemOptions.length : filteredOptions.length;
+
+  const childOptionsLabel = useMemo(() => {
+    if (!itemOptions.length) return "None";
+    const names = itemOptions.slice(0, 3).map((o) => o.title).join(", ");
+    if (!names) return `${itemOptions.length} option(s)`;
+    return `${itemOptions.length} option(s) — ${names}${itemOptions.length > 3 ? " +" + (itemOptions.length - 3) : ""}`;
+  }, [itemOptions]);
+
   const importedSourceItemIds = useMemo(() => {
     const set = new Set<string>();
     for (const opt of options) {
@@ -383,6 +397,8 @@ export default function ItemDetail() {
   const discountValueNum = parseNumberOrNull(discountValue);
   const effectivePriceValue =
     priceValue === null ? null : Math.max(0, priceValue - (computeDiscountAmount(priceValue, discountType, discountValueNum) || 0));
+  const inheritedItemPhotos = selectedOptionId ? optionAttachments[selectedOptionId] || [] : [];
+  const inheritedItemPhotoLabel = selectedOption ? `Using photos from "${selectedOption.title}".` : undefined;
 
   async function onSelectStatus(s: ItemStatus) {
     setStatus(s);
@@ -668,6 +684,7 @@ export default function ItemDetail() {
         tags: chosen.tags ? [...chosen.tags] : null,
         dimensions: chosen.dimensions ? { ...chosen.dimensions } : undefined,
         specs: chosen.specs ? { ...chosen.specs } : null,
+        notes: typeof chosen.notes === "string" ? chosen.notes : null,
       };
       await commit(next);
     } else {
@@ -684,9 +701,23 @@ export default function ItemDetail() {
   useEffect(() => {
     if (!optionToOpen) return;
     if (!itemOptions.some((o) => o.id === optionToOpen)) return;
+    setOptionOnlyId(optionToOpen);
     setOpenOpt((cur) => ({ ...cur, [optionToOpen]: true }));
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
   }, [itemOptions, loc.pathname, nav, optionToOpen]);
+
+  useEffect(() => {
+    if (!optionOnlyId) return;
+    if (!itemOptions.some((o) => o.id === optionOnlyId)) {
+      setOptionOnlyId(null);
+    }
+  }, [itemOptions, optionOnlyId]);
+
+  useEffect(() => {
+    if (!optionOnlyId) return;
+    setReorderMode(false);
+    setCompareOpen(false);
+  }, [optionOnlyId]);
 
   const itemModifiedFields = Array.isArray(item?.provenance?.modifiedFields) ? item?.provenance?.modifiedFields : [];
 
@@ -853,6 +884,25 @@ export default function ItemDetail() {
               />
             </div>
           </div>
+
+          {selectedOption ? (
+            <div className="rounded-lg border bg-secondary/40 p-3 text-sm">
+              <div className="font-medium">Using selected option: {selectedOption.title}</div>
+              <div className="mt-1 text-xs text-muted-foreground">Parent fields reflect the selected option.</div>
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setOptionOnlyId(selectedOption.id);
+                    setOpenOpt((cur) => ({ ...cur, [selectedOption.id]: true }));
+                  }}
+                >
+                  Edit selected option
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -1233,6 +1283,8 @@ export default function ItemDetail() {
           <AttachmentGallery
             label="Item photos"
             attachments={itemAttachments}
+            inheritedAttachments={inheritedItemPhotos}
+            inheritedLabel={inheritedItemPhotoLabel}
             onAdd={(files) => void handleAddAttachments("item", item.id, files)}
             onRemove={(attId) => void handleRemoveAttachment("item", item.id, attId)}
           />
@@ -1242,77 +1294,93 @@ export default function ItemDetail() {
       <Card className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold">Options</div>
-            <div className="text-xs text-muted-foreground">Track candidates, compare, then select a winner.</div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={() => setCompareOpen(true)} disabled={!itemOptions.length}>
-              Compare options
-            </Button>
-            <Button variant="secondary" onClick={() => setImportOpen(true)}>
-              Add existing Item as Option
-            </Button>
-            <Button variant="secondary" onClick={() => void onAddOption()}>
-              + Add option
-            </Button>
-          </div>
-        </div>
-
-        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div className="space-y-1.5">
-            <Label>Sort by</Label>
-            <select
-              value={`${optSortKey}:${optSortDir}`}
-              onChange={(e) => {
-                const [key, dir] = e.target.value.split(":");
-                if (key === "price") {
-                  setOptSortKey("price");
-                  setOptSortDir(dir === "desc" ? "desc" : "asc");
-                } else if (key === "priority") {
-                  setOptSortKey("priority");
-                  setOptSortDir("asc");
-                } else {
-                  setOptSortKey("name");
-                  setOptSortDir("asc");
-                }
-              }}
-              className="h-11 w-full rounded-md border bg-background px-3 text-base"
-            >
-              <option value="price:asc">Price (Low to High)</option>
-              <option value="price:desc">Price (High to Low)</option>
-              <option value="priority:asc">Priority</option>
-              <option value="name:asc">Name</option>
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <Label>Min price</Label>
-            <Input
-              inputMode="decimal"
-              value={optMinPrice}
-              onChange={(e) => setOptMinPrice(e.target.value)}
-              placeholder="$"
-              className="h-11 text-base"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Max price</Label>
-            <Input
-              inputMode="decimal"
-              value={optMaxPrice}
-              onChange={(e) => setOptMaxPrice(e.target.value)}
-              placeholder="$"
-              className="h-11 text-base"
-            />
-          </div>
-          <div className="flex items-end">
+            <div className="text-sm font-semibold">{optionOnly ? "Editing option" : "Options"}</div>
             <div className="text-xs text-muted-foreground">
-              Showing {reorderMode ? itemOptions.length : filteredOptions.length} option{(reorderMode ? itemOptions.length : filteredOptions.length) === 1 ? "" : "s"}
+              {optionOnly ? "You are editing a single variation for this item." : "Track candidates, compare, then select a winner."}
             </div>
           </div>
+          <div className="flex flex-wrap gap-2">
+            {optionOnly ? (
+              <Button variant="secondary" onClick={() => setOptionOnlyId(null)}>
+                Show all options
+              </Button>
+            ) : (
+              <>
+                <Button variant="secondary" onClick={() => setCompareOpen(true)} disabled={!itemOptions.length}>
+                  Compare options
+                </Button>
+                <Button variant="secondary" onClick={() => setImportOpen(true)}>
+                  Add existing Item as Option
+                </Button>
+                <Button variant="secondary" onClick={() => void onAddOption()}>
+                  + Add option
+                </Button>
+              </>
+            )}
+          </div>
         </div>
 
+        {!optionOnly ? (
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label>Sort by</Label>
+              <select
+                value={`${optSortKey}:${optSortDir}`}
+                onChange={(e) => {
+                  const [key, dir] = e.target.value.split(":");
+                  if (key === "price") {
+                    setOptSortKey("price");
+                    setOptSortDir(dir === "desc" ? "desc" : "asc");
+                  } else if (key === "priority") {
+                    setOptSortKey("priority");
+                    setOptSortDir("asc");
+                  } else {
+                    setOptSortKey("name");
+                    setOptSortDir("asc");
+                  }
+                }}
+                className="h-11 w-full rounded-md border bg-background px-3 text-base"
+              >
+                <option value="price:asc">Price (Low to High)</option>
+                <option value="price:desc">Price (High to Low)</option>
+                <option value="priority:asc">Priority</option>
+                <option value="name:asc">Name</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Min price</Label>
+              <Input
+                inputMode="decimal"
+                value={optMinPrice}
+                onChange={(e) => setOptMinPrice(e.target.value)}
+                placeholder="$"
+                className="h-11 text-base"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Max price</Label>
+              <Input
+                inputMode="decimal"
+                value={optMaxPrice}
+                onChange={(e) => setOptMaxPrice(e.target.value)}
+                placeholder="$"
+                className="h-11 text-base"
+              />
+            </div>
+            <div className="flex items-end">
+              <div className="text-xs text-muted-foreground">
+                Showing {optionsCount} option{optionsCount === 1 ? "" : "s"}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-3 text-xs text-muted-foreground">
+            Showing {optionsCount} option{optionsCount === 1 ? "" : "s"}.
+          </div>
+        )}
+
         <div className="mt-3 space-y-3">
-          {reorderMode && itemOptions.length ? (
+          {!optionOnly && reorderMode && itemOptions.length ? (
             <DragReorderList
               ariaLabel={`Reorder options for ${item.name}`}
               items={itemOptions.map((o) => {
@@ -1335,8 +1403,8 @@ export default function ItemDetail() {
           ) : (
             <div className="max-h-[520px] overflow-y-auto pr-1">
               <div className="space-y-3">
-                {(reorderMode ? itemOptions : pagedOptions).length ? (
-                  (reorderMode ? itemOptions : pagedOptions).map((o) => {
+                {optionsToRender.length ? (
+                  optionsToRender.map((o) => {
                     const total = optionTotalOrNull(o);
                     const final = total ?? 0;
                     const modifiedFields = Array.isArray(o.provenance?.modifiedFields) ? o.provenance.modifiedFields : [];
@@ -1408,7 +1476,7 @@ export default function ItemDetail() {
                           </div>
                         </div>
 
-                        {openOpt[o.id] ? (
+                        {openOpt[o.id] || optionOnly ? (
                           <div className="mt-4 space-y-3 border-t pt-4">
                             <div className="space-y-1.5">
                               <Label>Title</Label>
@@ -1727,6 +1795,8 @@ export default function ItemDetail() {
                       </Card>
                     );
                   })
+                ) : optionOnly ? (
+                  <div className="text-sm text-muted-foreground">Option not found.</div>
                 ) : itemOptions.length ? (
                   <div className="text-sm text-muted-foreground">No options match the current filters.</div>
                 ) : (
@@ -1737,7 +1807,7 @@ export default function ItemDetail() {
           )}
         </div>
 
-        {!reorderMode && totalPages > 1 ? (
+        {!optionOnly && !reorderMode && totalPages > 1 ? (
           <div className="mt-3 flex items-center justify-between">
             <div className="text-xs text-muted-foreground">
               Page {optionPage} of {totalPages}
@@ -1753,15 +1823,34 @@ export default function ItemDetail() {
           </div>
         ) : null}
 
-        <div className="mt-3">
-          <Button
-            variant={reorderMode ? "default" : "secondary"}
-            className="w-full"
-            onClick={() => setReorderMode((v) => !v)}
-            disabled={!itemOptions.length}
-          >
-            {reorderMode ? "Done reordering" : "Reorder options"}
-          </Button>
+        {!optionOnly ? (
+          <div className="mt-3">
+            <Button
+              variant={reorderMode ? "default" : "secondary"}
+              className="w-full"
+              onClick={() => setReorderMode((v) => !v)}
+              disabled={!itemOptions.length}
+            >
+              {reorderMode ? "Done reordering" : "Reorder options"}
+            </Button>
+          </div>
+        ) : null}
+      </Card>
+
+      <Card className="p-4">
+        <div className="text-sm font-semibold">Relationships</div>
+        <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+          <div>
+            Parent item:{" "}
+            {optionOnly ? (
+              <Button variant="link" className="h-auto p-0 text-sm" onClick={() => setOptionOnlyId(null)}>
+                {item.name}
+              </Button>
+            ) : (
+              "None"
+            )}
+          </div>
+          <div>Child options: {childOptionsLabel}</div>
         </div>
       </Card>
 
@@ -1914,22 +2003,28 @@ export default function ItemDetail() {
 function AttachmentGallery({
   label,
   attachments,
+  inheritedAttachments,
+  inheritedLabel,
   onAdd,
   onRemove,
 }: {
   label: string;
   attachments: AttachmentRecord[];
+  inheritedAttachments?: AttachmentRecord[];
+  inheritedLabel?: string;
   onAdd: (files: FileList | null) => void;
   onRemove: (id: string) => void;
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
   const max = 3;
+  const usingInherited = attachments.length === 0 && Boolean(inheritedAttachments && inheritedAttachments.length);
+  const displayAttachments = usingInherited ? inheritedAttachments || [] : attachments;
 
   useEffect(() => {
     const next: Record<string, string> = {};
     const toRevoke: string[] = [];
-    for (const att of attachments) {
+    for (const att of displayAttachments) {
       if (att.sourceUrl) {
         next[att.id] = att.sourceUrl;
         continue;
@@ -1942,7 +2037,7 @@ function AttachmentGallery({
     return () => {
       toRevoke.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [attachments]);
+  }, [displayAttachments]);
 
   return (
     <div className="space-y-2">
@@ -1988,6 +2083,21 @@ function AttachmentGallery({
               </button>
             </div>
           ))}
+        </div>
+      ) : usingInherited ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {displayAttachments.slice(0, max).map((att) => (
+              <div key={att.id} className="relative h-24 w-24 overflow-hidden rounded-md border bg-background">
+                {urls[att.id] ? (
+                  <img src={urls[att.id]} alt={att.name || "Attachment"} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">Loading</div>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="text-xs text-muted-foreground">{inheritedLabel || "Showing photos from the selected option."}</div>
         </div>
       ) : (
         <div className="text-xs text-muted-foreground">No photos yet.</div>

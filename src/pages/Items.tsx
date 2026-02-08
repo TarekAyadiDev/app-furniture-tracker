@@ -250,6 +250,7 @@ export default function Items() {
         tags: option.tags ? [...option.tags] : null,
         dimensions: option.dimensions ? { ...option.dimensions } : undefined,
         specs: option.specs ? { ...option.specs } : null,
+        notes: typeof option.notes === "string" ? option.notes : null,
       });
     } catch (err: any) {
       toast({ title: "Selection failed", description: err?.message || "Could not select this option." });
@@ -514,7 +515,7 @@ export default function Items() {
                         return (
                           <Card key={it.id} className="p-3">
                             <div className="flex items-start gap-3">
-                              <ItemPhotoStrip itemId={it.id} />
+                              <ItemPhotoStrip itemId={it.id} fallbackOptionId={selectedOpt?.id || null} />
                               <div className="min-w-0 flex-1">
                                 <div
                                   role="button"
@@ -764,10 +765,12 @@ export default function Items() {
   );
 }
 
-function ItemPhotoStrip({ itemId }: { itemId: string }) {
+function ItemPhotoStrip({ itemId, fallbackOptionId }: { itemId: string; fallbackOptionId?: string | null }) {
   const { toast } = useToast();
   const [attachments, setAttachments] = useState<AttachmentRecord[]>([]);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const [fallbackAttachments, setFallbackAttachments] = useState<AttachmentRecord[]>([]);
+  const [fallbackUrls, setFallbackUrls] = useState<Record<string, string>>({});
   const max = 3;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -786,6 +789,24 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
   }, [itemId]);
 
   useEffect(() => {
+    if (!fallbackOptionId) {
+      setFallbackAttachments([]);
+      return;
+    }
+    let active = true;
+    listAttachments("option", fallbackOptionId)
+      .then((rows) => {
+        if (active) setFallbackAttachments(rows);
+      })
+      .catch(() => {
+        if (active) setFallbackAttachments([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [fallbackOptionId]);
+
+  useEffect(() => {
     const next: Record<string, string> = {};
     const toRevoke: string[] = [];
     for (const att of attachments) {
@@ -802,6 +823,24 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
       toRevoke.forEach((url) => URL.revokeObjectURL(url));
     };
   }, [attachments]);
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    const toRevoke: string[] = [];
+    for (const att of fallbackAttachments) {
+      if (att.sourceUrl) {
+        next[att.id] = att.sourceUrl;
+        continue;
+      }
+      const url = URL.createObjectURL(att.blob);
+      next[att.id] = url;
+      toRevoke.push(url);
+    }
+    setFallbackUrls(next);
+    return () => {
+      toRevoke.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [fallbackAttachments]);
 
   async function onRemove(attId: string) {
     await deleteAttachment(attId);
@@ -829,58 +868,71 @@ function ItemPhotoStrip({ itemId }: { itemId: string }) {
     }
   }
 
+  const usingFallback = attachments.length === 0 && fallbackAttachments.length > 0;
+  const displayAttachments = usingFallback ? fallbackAttachments : attachments;
+  const displayUrls = usingFallback ? fallbackUrls : urls;
+
   return (
     <div className="w-[120px] shrink-0 space-y-2">
-      {attachments.length ? (
+      {displayAttachments.length ? (
         <div className="flex flex-col gap-2">
           {/* Main large image */}
-          {attachments[0] && (
+          {displayAttachments[0] && (
             <div className="relative aspect-square w-full overflow-hidden rounded-lg border bg-background shadow-sm transition-all hover:scale-[1.02]">
-              {urls[attachments[0].id] ? (
-                <img src={urls[attachments[0].id]} alt={attachments[0].name || "Item photo"} className="h-full w-full object-cover" />
+              {displayUrls[displayAttachments[0].id] ? (
+                <img
+                  src={displayUrls[displayAttachments[0].id]}
+                  alt={displayAttachments[0].name || "Item photo"}
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">Loading...</div>
               )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  void onRemove(attachments[0].id);
-                }}
-                className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/80 text-xs text-foreground backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
-                aria-label="Remove photo"
-              >
-                &times;
-              </button>
+              {!usingFallback ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void onRemove(displayAttachments[0].id);
+                  }}
+                  className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background/80 text-xs text-foreground backdrop-blur-sm transition-colors hover:bg-destructive hover:text-destructive-foreground"
+                  aria-label="Remove photo"
+                >
+                  &times;
+                </button>
+              ) : null}
             </div>
           )}
           {/* Smaller thumbnails for others */}
-          {attachments.length > 1 && (
+          {displayAttachments.length > 1 && (
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {attachments.slice(1, max).map((att) => (
+              {displayAttachments.slice(1, max).map((att) => (
                 <div key={att.id} className="relative h-10 w-10 shrink-0 overflow-hidden rounded-md border bg-background shadow-sm">
-                  {urls[att.id] ? (
-                    <img src={urls[att.id]} alt={att.name || "Item photo"} className="h-full w-full object-cover" />
+                  {displayUrls[att.id] ? (
+                    <img src={displayUrls[att.id]} alt={att.name || "Item photo"} className="h-full w-full object-cover" />
                   ) : (
                     <div className="flex h-full w-full items-center justify-center text-[8px] text-muted-foreground">...</div>
                   )}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      void onRemove(att.id);
-                    }}
-                    className="absolute right-0.5 top-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-background/80 text-[8px] text-foreground hover:bg-destructive hover:text-destructive-foreground"
-                    aria-label="Remove photo"
-                  >
-                    &times;
-                  </button>
+                  {!usingFallback ? (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        void onRemove(att.id);
+                      }}
+                      className="absolute right-0.5 top-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-background/80 text-[8px] text-foreground hover:bg-destructive hover:text-destructive-foreground"
+                      aria-label="Remove photo"
+                    >
+                      &times;
+                    </button>
+                  ) : null}
                 </div>
               ))}
             </div>
           )}
+          {usingFallback ? <div className="text-[10px] text-muted-foreground">Using selected option photo</div> : null}
         </div>
       ) : (
         <div className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-xs text-muted-foreground">
