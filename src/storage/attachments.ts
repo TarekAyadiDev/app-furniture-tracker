@@ -77,7 +77,8 @@ async function uploadToS3(blob: Blob, opts: { name?: string | null; parentType: 
     body: blob,
   });
   if (!putRes.ok) {
-    throw new Error(`Upload failed (${putRes.status})`);
+    const errText = await putRes.text().catch(() => "");
+    throw new Error(errText ? `Upload failed (${putRes.status}): ${errText}` : `Upload failed (${putRes.status})`);
   }
   return signed.publicUrl;
 }
