@@ -166,7 +166,7 @@ export default function Settings() {
       return res;
     } catch (err: any) {
       toast({ title: "Sync failed", description: err?.message || "Unknown error" });
-      throw err;
+      return null;
     } finally {
       setSyncing(false);
     }

@@ -1,4 +1,4 @@
-import { getAirtableConfig, listAllRecords } from "../_lib/airtable";
+import { getAirtableConfig, listAllRecords } from "../_lib/airtable.js";
 
 function toNumber(v: any): number | null {
   if (v === null || v === undefined) return null;

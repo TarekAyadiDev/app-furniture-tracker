@@ -1,4 +1,4 @@
-import { createRecords, deleteRecords, getAirtableConfig, updateRecords } from "../_lib/airtable";
+import { createRecords, deleteRecords, getAirtableConfig, updateRecords } from "../_lib/airtable.js";
 
 function buildNotes(userNotesRaw: any, meta: any) {
   const userNotes = typeof userNotesRaw === "string" ? userNotesRaw.trimEnd() : "";

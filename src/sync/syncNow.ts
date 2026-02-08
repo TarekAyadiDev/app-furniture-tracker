@@ -20,6 +20,26 @@ function isRecordId(id: string) {
   return id.startsWith("rec");
 }
 
+async function readJsonOrText<T>(res: Response): Promise<{ json: T | null; text: string }> {
+  const text = await res.text().catch(() => "");
+  if (!text) return { json: null, text: "" };
+  try {
+    return { json: JSON.parse(text) as T, text };
+  } catch {
+    return { json: null, text };
+  }
+}
+
+async function fetchWithTimeout(input: RequestInfo, init: RequestInit, timeoutMs = 20000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 async function rekeyItem(localId: string, remoteId: string) {
   const item = await idbGet<Item>("items", localId);
   if (!item) return;
@@ -84,13 +104,17 @@ export async function syncNow() {
   };
 
   // Push changes
-  const pushRes = await fetch("/api/sync/push", {
+  const pushRes = await fetchWithTimeout("/api/sync/push", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(dirty),
   });
-  const pushJson = (await pushRes.json()) as PushResponse;
-  if (!pushRes.ok || !pushJson.ok) throw new Error(pushJson.message || "Sync push failed");
+  const pushParsed = await readJsonOrText<PushResponse>(pushRes);
+  const pushJson = pushParsed.json;
+  if (!pushRes.ok || !pushJson?.ok) {
+    const msg = pushJson?.message || pushParsed.text || `Sync push failed (${pushRes.status})`;
+    throw new Error(msg);
+  }
 
   const created = pushJson.created || {};
 
@@ -128,9 +152,13 @@ export async function syncNow() {
   }
 
   // Pull remote and merge
-  const pullRes = await fetch("/api/sync/pull");
-  const pullJson = (await pullRes.json()) as PullResponse;
-  if (!pullRes.ok || !pullJson.ok || !pullJson.bundle) throw new Error(pullJson.message || "Sync pull failed");
+  const pullRes = await fetchWithTimeout("/api/sync/pull", {}, 20000);
+  const pullParsed = await readJsonOrText<PullResponse>(pullRes);
+  const pullJson = pullParsed.json;
+  if (!pullRes.ok || !pullJson?.ok || !pullJson.bundle) {
+    const msg = pullJson?.message || pullParsed.text || `Sync pull failed (${pullRes.status})`;
+    throw new Error(msg);
+  }
   await applyPulledBundle(pullJson.bundle);
 
   const summary = {

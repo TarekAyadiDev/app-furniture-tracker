@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "guard:secrets": "node scripts/guard-secrets.mjs",
+    "airtable:ensure-fields": "node scripts/airtable-ensure-fields.mjs",
     "predev": "npm run guard:secrets",
     "dev": "vite",
     "prebuild": "npm run guard:secrets",
