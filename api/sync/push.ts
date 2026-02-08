@@ -1,4 +1,4 @@
-import { createRecords, deleteRecords, getAirtableConfig, updateRecords } from "../_lib/airtable.js";
+import { createRecords, deleteRecords, getAirtableConfig, listAllRecords, updateRecords } from "../_lib/airtable.js";
 
 function buildNotes(userNotesRaw: any, meta: any) {
   const userNotes = typeof userNotesRaw === "string" ? userNotesRaw.trimEnd() : "";
@@ -48,13 +48,21 @@ export default async function handler(req: any, res: any) {
 
   try {
     const body = await parseBody(req);
+    const mode = typeof body?.mode === "string" ? body.mode : "commit";
+    const forceCreate = mode === "reset";
     const items = Array.isArray(body.items) ? body.items : [];
     const options = Array.isArray(body.options) ? body.options : [];
     const measurements = Array.isArray(body.measurements) ? body.measurements : [];
     const rooms = Array.isArray(body.rooms) ? body.rooms : [];
 
-    const { token, baseId, tableId } = getAirtableConfig();
+    const { token, baseId, tableId, view } = getAirtableConfig();
     const PRIORITY_FIELD = process.env.AIRTABLE_PRIORITY_FIELD || "Priority";
+
+    if (forceCreate) {
+      const existing = await listAllRecords({ token, baseId, tableId, view });
+      const ids = existing.map((r) => r.id).filter(Boolean);
+      if (ids.length) await deleteRecords({ token, baseId, tableId, ids });
+    }
 
     // --- Items ---
     const itemCreates: any[] = [];
@@ -67,7 +75,7 @@ export default async function handler(req: any, res: any) {
       if (!localId) continue;
 
       const syncState = String(it.syncState || "").trim();
-      const remoteId = isRemoteId(it.remoteId) ? it.remoteId : isRemoteId(it.id) ? it.id : null;
+      const remoteId = forceCreate ? null : isRemoteId(it.remoteId) ? it.remoteId : isRemoteId(it.id) ? it.id : null;
 
       if (syncState === "deleted") {
         if (remoteId) itemDeletes.push(remoteId);
@@ -124,7 +132,7 @@ export default async function handler(req: any, res: any) {
       const localId = String(m.id || "").trim();
       if (!localId) continue;
       const syncState = String(m.syncState || "").trim();
-      const remoteId = isRemoteId(m.remoteId) ? m.remoteId : isRemoteId(m.id) ? m.id : null;
+      const remoteId = forceCreate ? null : isRemoteId(m.remoteId) ? m.remoteId : isRemoteId(m.id) ? m.id : null;
       if (syncState === "deleted") {
         if (remoteId) measDeletes.push(remoteId);
         continue;
@@ -174,7 +182,7 @@ export default async function handler(req: any, res: any) {
       if (!rid) continue;
       const syncState = String(r.syncState || "").trim();
       if (syncState === "deleted") continue;
-      const remoteId = isRemoteId(r.remoteId) ? r.remoteId : null;
+      const remoteId = forceCreate ? null : isRemoteId(r.remoteId) ? r.remoteId : null;
       const meta = {
         sort: typeof r.sort === "number" ? r.sort : null,
         createdAt: typeof r.createdAt === "number" ? r.createdAt : Date.now(),
@@ -215,7 +223,7 @@ export default async function handler(req: any, res: any) {
       const localId = String(o.id || "").trim();
       if (!localId) continue;
       const syncState = String(o.syncState || "").trim();
-      const remoteId = isRemoteId(o.remoteId) ? o.remoteId : isRemoteId(o.id) ? o.id : null;
+      const remoteId = forceCreate ? null : isRemoteId(o.remoteId) ? o.remoteId : isRemoteId(o.id) ? o.id : null;
       if (syncState === "deleted") {
         if (remoteId) optDeletes.push(remoteId);
         continue;

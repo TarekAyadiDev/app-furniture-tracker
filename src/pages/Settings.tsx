@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
 import { useToast } from "@/hooks/use-toast";
-import { syncNow } from "@/sync/syncNow";
+import { pullNow, pushNow } from "@/sync/syncNow";
 import type { RoomId } from "@/lib/domain";
 import { normalizeRoomName } from "@/lib/rooms";
 
@@ -112,7 +112,9 @@ export default function Settings() {
   const [importAiAssisted, setImportAiAssisted] = useState(false);
   const [health, setHealth] = useState<Health | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const [plannerText, setPlannerText] = useState("");
   const [plannerError, setPlannerError] = useState<string | null>(null);
@@ -157,18 +159,51 @@ export default function Settings() {
     }
   }
 
-  async function onSyncNow() {
-    setSyncing(true);
+  async function onPullNow() {
+    setPulling(true);
     try {
-      const res = await syncNow();
-      toast({ title: "Synced", description: `Push: ${formatSyncCounts(res.push)} · Pull: ${formatSyncCounts(res.pull)}` });
+      const res = await pullNow();
+      toast({ title: "Pulled", description: `Pulled: ${formatSyncCounts(res.pull)}` });
       void runHealth();
       return res;
     } catch (err: any) {
-      toast({ title: "Sync failed", description: err?.message || "Unknown error" });
+      toast({ title: "Pull failed", description: err?.message || "Unknown error" });
       return null;
     } finally {
-      setSyncing(false);
+      setPulling(false);
+    }
+  }
+
+  async function onPushNow() {
+    setPushing(true);
+    try {
+      const res = await pushNow();
+      toast({ title: "Pushed", description: `Pushed: ${formatSyncCounts(res.push)}` });
+      void runHealth();
+      return res;
+    } catch (err: any) {
+      toast({ title: "Push failed", description: err?.message || "Unknown error" });
+      return null;
+    } finally {
+      setPushing(false);
+    }
+  }
+
+  async function onResetAndPush() {
+    if (!confirm("Reset Airtable records in the current view, then push local data? This deletes Airtable rows first.")) {
+      return null;
+    }
+    setResetting(true);
+    try {
+      const res = await pushNow("reset");
+      toast({ title: "Reset + pushed", description: `Pushed: ${formatSyncCounts(res.push)}` });
+      void runHealth();
+      return res;
+    } catch (err: any) {
+      toast({ title: "Reset push failed", description: err?.message || "Unknown error" });
+      return null;
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -489,15 +524,35 @@ export default function Settings() {
         <div className="mt-2 text-xs text-muted-foreground">
           Local dev: copy `.env.example` to `.env.local`, fill values, then restart `npm run dev`.
         </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Pull uses the Airtable view if `AIRTABLE_VIEW_ID` or `AIRTABLE_VIEW_NAME` is set. Push always writes to the table.
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Reset + push deletes Airtable rows in the current view first, then writes local data (useful for template resets).
+        </div>
         <div className="mt-3 flex gap-2">
           <Button variant="secondary" onClick={() => void runHealth()} disabled={healthLoading}>
             {healthLoading ? "Checking..." : "Check backend"}
           </Button>
           <Button
-            onClick={() => void onSyncNow()}
-            disabled={syncing || healthLoading || !health?.ok || !health.airtableConfigured}
+            variant="secondary"
+            onClick={() => void onPullNow()}
+            disabled={pulling || pushing || resetting || healthLoading || !health?.ok || !health.airtableConfigured}
           >
-            {syncing ? "Syncing..." : "Sync now"}
+            {pulling ? "Pulling..." : "Pull from Airtable"}
+          </Button>
+          <Button
+            onClick={() => void onPushNow()}
+            disabled={pulling || pushing || resetting || healthLoading || !health?.ok || !health.airtableConfigured}
+          >
+            {pushing ? "Pushing..." : "Push to Airtable"}
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => void onResetAndPush()}
+            disabled={pulling || pushing || resetting || healthLoading || !health?.ok || !health.airtableConfigured}
+          >
+            {resetting ? "Resetting..." : "Reset + Push"}
           </Button>
         </div>
         {health ? (
@@ -519,7 +574,7 @@ export default function Settings() {
           {dirtyCounts.rooms}.
         </div>
         <div className="mt-2 text-xs text-muted-foreground">
-          Last sync:{" "}
+          Last sync action:{" "}
           <span className="font-semibold">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : "Never"}</span>
         </div>
         {lastSyncSummary ? (

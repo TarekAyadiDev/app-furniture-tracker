@@ -15,6 +15,7 @@ type PushResponse = {
 };
 
 type PullResponse = { ok: boolean; bundle?: ExportBundleV1; message?: string };
+type PushMode = "commit" | "reset";
 
 function isRecordId(id: string) {
   return id.startsWith("rec");
@@ -94,6 +95,16 @@ async function applyPulledBundle(bundle: ExportBundleV1) {
 }
 
 export async function syncNow() {
+  const push = await pushChanges("commit");
+  const pull = await pullChanges();
+  const summary = { push: push.counts, pull: pull.counts };
+  await idbSetMeta("lastSyncAt", Date.now());
+  await idbSetMeta("lastSyncSummary", summary);
+  notifyDbChanged();
+  return summary;
+}
+
+async function pushChanges(mode: PushMode = "commit") {
   const snap = await idbGetSnapshot();
   const dirty = {
     // Treat missing syncState as dirty so imported/example data can be pushed on first sync.
@@ -103,11 +114,10 @@ export async function syncNow() {
     rooms: snap.rooms.filter((x) => x.syncState !== "clean"),
   };
 
-  // Push changes
   const pushRes = await fetchWithTimeout("/api/sync/push", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(dirty),
+    body: JSON.stringify({ mode, ...dirty }),
   });
   const pushParsed = await readJsonOrText<PushResponse>(pushRes);
   const pushJson = pushParsed.json;
@@ -151,7 +161,10 @@ export async function syncNow() {
     if (r.syncState === "dirty") await idbPut("rooms", { ...r, syncState: "clean" });
   }
 
-  // Pull remote and merge
+  return { counts: pushJson.counts || {} };
+}
+
+async function pullChanges() {
   const pullRes = await fetchWithTimeout("/api/sync/pull", {}, 20000);
   const pullParsed = await readJsonOrText<PullResponse>(pullRes);
   const pullJson = pullParsed.json;
@@ -161,19 +174,30 @@ export async function syncNow() {
   }
   await applyPulledBundle(pullJson.bundle);
 
-  const summary = {
-    push: pushJson.counts || {},
-    pull: {
+  return {
+    counts: {
       items: pullJson.bundle.items.length,
       options: pullJson.bundle.options.length,
       measurements: pullJson.bundle.measurements.length,
       rooms: pullJson.bundle.rooms.length,
     },
   };
+}
 
+export async function pushNow(mode: PushMode = "commit") {
+  const push = await pushChanges(mode);
+  const summary = { push: push.counts, pull: { items: 0, options: 0, measurements: 0, rooms: 0 } };
   await idbSetMeta("lastSyncAt", Date.now());
   await idbSetMeta("lastSyncSummary", summary);
   notifyDbChanged();
+  return summary;
+}
 
+export async function pullNow() {
+  const pull = await pullChanges();
+  const summary = { push: {}, pull: pull.counts };
+  await idbSetMeta("lastSyncAt", Date.now());
+  await idbSetMeta("lastSyncSummary", summary);
+  notifyDbChanged();
   return summary;
 }
