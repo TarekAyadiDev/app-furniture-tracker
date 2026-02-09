@@ -36,18 +36,10 @@ function pushRecent(key: string, value: string, max = 6) {
 export default function Shopping() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, stores, createItem } = useData();
+  const { orderedRooms, roomNameById, items, orderedStores, createItem } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
   const validRoomIds = useMemo(() => new Set(orderedRoomIds), [orderedRoomIds]);
-  const orderedStores = useMemo(
-    () =>
-      stores
-        .filter((s) => s.syncState !== "deleted")
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [stores],
-  );
   const validStoreKeys = useMemo(() => new Set(orderedStores.map((s) => storeKey(s.name))), [orderedStores]);
 
   const nameRef = useRef<HTMLInputElement | null>(null);

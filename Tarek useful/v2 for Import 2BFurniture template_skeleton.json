@@ -1,0 +1,157 @@
+{
+  "version": "REQUIRED: number. Must be 2 for current schema.",
+  "exportedAt": "REQUIRED: ISO 8601 timestamp string, e.g. 2026-02-09T12:00:00.000Z",
+  "exportMeta": {
+    "exportedAt": "REQUIRED: epoch milliseconds number (same moment as exportedAt).",
+    "exportedBy": "REQUIRED: 'human' | 'ai' | 'import' | 'system'.",
+    "schemaVersion": "REQUIRED: number 2.",
+    "sessionId": "OPTIONAL: string id for this export session or null."
+  },
+  "home": {
+    "name": "OPTIONAL: home name string.",
+    "tags": "OPTIONAL: array of strings.",
+    "description": "OPTIONAL: longer description string."
+  },
+  "planner": "OPTIONAL: null or planner object (kept as-is).",
+  "rooms": [
+    {
+      "id": "REQUIRED: room id string. Items must reference an existing room id.",
+      "name": "OPTIONAL: display name string. If missing, name defaults from id.",
+      "notes": "OPTIONAL: notes string.",
+      "sort": "OPTIONAL: number for ordering (lower first).",
+      "createdAt": "OPTIONAL: epoch milliseconds number.",
+      "updatedAt": "OPTIONAL: epoch milliseconds number.",
+      "remoteId": "OPTIONAL: Airtable record id (starts with 'rec').",
+      "syncState": "OPTIONAL: 'clean' | 'dirty' | 'deleted'.",
+      "provenance": "OPTIONAL: provenance object."
+    }
+  ],
+  "measurements": [
+    {
+      "id": "REQUIRED: measurement id string.",
+      "room": "REQUIRED: room id string (must exist in rooms).",
+      "label": "REQUIRED: label string.",
+      "valueIn": "REQUIRED: number in inches.",
+      "sort": "OPTIONAL: number for ordering.",
+      "confidence": "OPTIONAL: 'low' | 'med' | 'high' | null.",
+      "forCategory": "OPTIONAL: string category.",
+      "forItemId": "OPTIONAL: item id string.",
+      "notes": "OPTIONAL: notes string or null.",
+      "createdAt": "OPTIONAL: epoch milliseconds number.",
+      "updatedAt": "OPTIONAL: epoch milliseconds number.",
+      "remoteId": "OPTIONAL: Airtable record id (starts with 'rec').",
+      "syncState": "OPTIONAL: 'clean' | 'dirty' | 'deleted'.",
+      "provenance": "OPTIONAL: provenance object."
+    }
+  ],
+  "stores": [
+    {
+      "id": "REQUIRED: store id string.",
+      "name": "REQUIRED: store name string. Items/options may reference this name.",
+      "sort": "OPTIONAL: number for ordering (lower first).",
+      "discountType": "OPTIONAL: 'amount' | 'percent' | null.",
+      "discountValue": "OPTIONAL: number.",
+      "deliveryInfo": "OPTIONAL: string.",
+      "extraWarranty": "OPTIONAL: string.",
+      "trial": "OPTIONAL: string.",
+      "apr": "OPTIONAL: string.",
+      "notes": "OPTIONAL: string or null.",
+      "createdAt": "OPTIONAL: epoch milliseconds number.",
+      "updatedAt": "OPTIONAL: epoch milliseconds number.",
+      "remoteId": "OPTIONAL: Airtable record id (starts with 'rec').",
+      "syncState": "OPTIONAL: 'clean' | 'dirty' | 'deleted'.",
+      "provenance": "OPTIONAL: provenance object."
+    }
+  ],
+  "items": [
+    {
+      "id": "REQUIRED: item id string.",
+      "name": "REQUIRED: item name string.",
+      "room": "REQUIRED: room id string (must exist in rooms).",
+      "category": "REQUIRED: category string.",
+      "status": "REQUIRED: 'Idea' | 'Shortlist' | 'Selected' | 'Ordered' | 'Delivered' | 'Installed'.",
+      "selectedOptionId": "OPTIONAL: option id string.",
+      "sort": "OPTIONAL: number for ordering within a room.",
+      "price": "OPTIONAL: number or null.",
+      "discountType": "OPTIONAL: 'amount' | 'percent' | null.",
+      "discountValue": "OPTIONAL: number or null.",
+      "qty": "REQUIRED: number (quantity).",
+      "store": "OPTIONAL: store name string (should match a store.name).",
+      "link": "OPTIONAL: URL string.",
+      "notes": "OPTIONAL: notes string or null.",
+      "priority": "OPTIONAL: number (1-5).",
+      "tags": "OPTIONAL: array of strings.",
+      "dimensions": {
+        "wIn": "OPTIONAL: number (width inches).",
+        "dIn": "OPTIONAL: number (depth inches).",
+        "hIn": "OPTIONAL: number (height inches)."
+      },
+      "specs": {
+        "any_key": "OPTIONAL: string/number/boolean/null. Use for flexible attributes."
+      },
+      "attachments": [
+        {
+          "id": "OPTIONAL: attachment id string.",
+          "url": "REQUIRED if present: source URL string.",
+          "name": "OPTIONAL: filename string.",
+          "mime": "OPTIONAL: MIME type string.",
+          "size": "OPTIONAL: number of bytes.",
+          "createdAt": "OPTIONAL: epoch milliseconds number.",
+          "updatedAt": "OPTIONAL: epoch milliseconds number."
+        }
+      ],
+      "createdAt": "OPTIONAL: epoch milliseconds number.",
+      "updatedAt": "OPTIONAL: epoch milliseconds number.",
+      "remoteId": "OPTIONAL: Airtable record id (starts with 'rec').",
+      "syncState": "OPTIONAL: 'clean' | 'dirty' | 'deleted'.",
+      "provenance": "OPTIONAL: provenance object."
+    }
+  ],
+  "options": [
+    {
+      "id": "REQUIRED: option id string.",
+      "itemId": "REQUIRED: parent item id string (must exist in items).",
+      "title": "REQUIRED: option title string.",
+      "sort": "OPTIONAL: number for ordering within item.",
+      "store": "OPTIONAL: store name string (should match a store.name).",
+      "link": "OPTIONAL: URL string.",
+      "promoCode": "OPTIONAL: string.",
+      "price": "OPTIONAL: number.",
+      "shipping": "OPTIONAL: number.",
+      "taxEstimate": "OPTIONAL: number.",
+      "discount": "OPTIONAL: number (legacy amount).",
+      "discountType": "OPTIONAL: 'amount' | 'percent' | null.",
+      "discountValue": "OPTIONAL: number or null.",
+      "dimensionsText": "OPTIONAL: string (e.g., '84x36x34 in').",
+      "dimensions": {
+        "wIn": "OPTIONAL: number (width inches).",
+        "dIn": "OPTIONAL: number (depth inches).",
+        "hIn": "OPTIONAL: number (height inches)."
+      },
+      "specs": {
+        "any_key": "OPTIONAL: string/number/boolean/null. Use for flexible attributes."
+      },
+      "notes": "OPTIONAL: notes string or null.",
+      "priority": "OPTIONAL: number (1-5).",
+      "tags": "OPTIONAL: array of strings.",
+      "selected": "OPTIONAL: boolean.",
+      "sourceItemId": "OPTIONAL: string (if option was imported from another item).",
+      "attachments": [
+        {
+          "id": "OPTIONAL: attachment id string.",
+          "url": "REQUIRED if present: source URL string.",
+          "name": "OPTIONAL: filename string.",
+          "mime": "OPTIONAL: MIME type string.",
+          "size": "OPTIONAL: number of bytes.",
+          "createdAt": "OPTIONAL: epoch milliseconds number.",
+          "updatedAt": "OPTIONAL: epoch milliseconds number."
+        }
+      ],
+      "createdAt": "OPTIONAL: epoch milliseconds number.",
+      "updatedAt": "OPTIONAL: epoch milliseconds number.",
+      "remoteId": "OPTIONAL: Airtable record id (starts with 'rec').",
+      "syncState": "OPTIONAL: 'clean' | 'dirty' | 'deleted'.",
+      "provenance": "OPTIONAL: provenance object."
+    }
+  ]
+}

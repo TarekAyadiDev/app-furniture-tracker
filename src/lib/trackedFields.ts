@@ -123,6 +123,7 @@ export const ROOM_TRACKED_FIELDS: TrackedFieldSpec<Room>[] = [
 
 export const STORE_TRACKED_FIELDS: TrackedFieldSpec<Store>[] = [
   { field: "name", get: (s) => s.name, normalize: normalizeString },
+  { field: "sort", get: (s) => s.sort, normalize: normalizeOptionalNumber },
   { field: "discountType", get: (s) => s.discountType, normalize: normalizeOptionalString },
   { field: "discountValue", get: (s) => s.discountValue, normalize: normalizeOptionalNumber },
   { field: "deliveryInfo", get: (s) => s.deliveryInfo, normalize: normalizeOptionalString },

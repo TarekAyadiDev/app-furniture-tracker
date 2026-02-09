@@ -156,7 +156,7 @@ export default function ItemDetail() {
     measurements,
     items,
     options,
-    stores,
+    orderedStores,
     reorderOptions,
     renameCategory,
     createItem,
@@ -170,15 +170,7 @@ export default function ItemDetail() {
   } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
-  const storeByName = useMemo(() => buildStoreIndex(stores), [stores]);
-  const orderedStores = useMemo(
-    () =>
-      stores
-        .filter((s) => s.syncState !== "deleted")
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [stores],
-  );
+  const storeByName = useMemo(() => buildStoreIndex(orderedStores), [orderedStores]);
 
   const item = useMemo(() => items.find((x) => x.id === id), [items, id]);
   const storeForItem = useMemo(() => (item ? storeByName.get(storeKey(item.store)) || null : null), [item, storeByName]);

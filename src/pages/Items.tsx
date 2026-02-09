@@ -59,7 +59,7 @@ function pickSelectedOption(item: Item, list: Option[]): Option | null {
 export default function Items() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, options, stores, reorderRooms, reorderItems, reorderOptions, createItem, updateItem, createOption, updateOption } =
+  const { orderedRooms, roomNameById, items, options, orderedStores, reorderRooms, reorderItems, reorderOptions, createItem, updateItem, createOption, updateOption } =
     useData();
 
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -78,15 +78,7 @@ export default function Items() {
   const [reorderOptionsForItem, setReorderOptionsForItem] = useState<Record<string, boolean>>({});
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
-  const storeByName = useMemo(() => buildStoreIndex(stores), [stores]);
-  const orderedStores = useMemo(
-    () =>
-      stores
-        .filter((s) => s.syncState !== "deleted")
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [stores],
-  );
+  const storeByName = useMemo(() => buildStoreIndex(orderedStores), [orderedStores]);
 
   function buildCopyName(base: string) {
     const name = base.trim() || "New item";

@@ -9,21 +9,14 @@ import type { Store } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { normalizeStoreName, storeKey } from "@/lib/storePricing";
 import { useToast } from "@/hooks/use-toast";
+import { DragReorderList } from "@/components/reorder/DragReorderList";
 
 export default function Stores() {
   const { toast } = useToast();
-  const { stores, items, options, createStore, updateStore, deleteStore } = useData();
+  const { stores, orderedStores, items, options, createStore, updateStore, deleteStore, reorderStores } = useData();
   const [newName, setNewName] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
-
-  const orderedStores = useMemo(
-    () =>
-      stores
-        .filter((s) => s.syncState !== "deleted")
-        .slice()
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [stores],
-  );
+  const [reorderMode, setReorderMode] = useState(false);
 
   const usageByStore = useMemo(() => {
     const map = new Map<string, { items: number; options: number }>();
@@ -222,6 +215,31 @@ export default function Stores() {
           <p className="text-sm text-muted-foreground">No stores yet. Add one to start building store policies.</p>
         </Card>
       )}
+
+      <Card className="rounded-2xl border border-border p-4 shadow-sm">
+        <h2 className="font-heading text-lg text-foreground">Reorder stores</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Drag the handle to reorder stores.</p>
+        {reorderMode ? (
+          <div className="mt-3">
+            <DragReorderList
+              ariaLabel="Reorder stores"
+              items={orderedStores.map((s) => ({ id: s.id, title: s.name }))}
+              onCommit={async (ids) => {
+                await reorderStores(ids as string[]);
+              }}
+            />
+          </div>
+        ) : null}
+        <div className="mt-3">
+          <Button
+            variant={reorderMode ? "default" : "secondary"}
+            className="w-full rounded-xl transition-all duration-150 active:scale-[0.98]"
+            onClick={() => setReorderMode((v) => !v)}
+          >
+            {reorderMode ? "Done" : "Reorder"}
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 }

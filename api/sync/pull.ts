@@ -174,6 +174,7 @@ export default async function handler(req: any, res: any) {
           remoteId: rec.id,
           syncState: "clean",
           name,
+          sort: toNumber(meta?.sort),
           discountType: typeof meta?.discountType === "string" ? meta.discountType : null,
           discountValue: toNumber(meta?.discountValue) ?? toNumber(f["Discount Value"] ?? f["Discount"]),
           deliveryInfo:

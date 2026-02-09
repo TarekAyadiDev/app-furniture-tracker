@@ -19,6 +19,17 @@ export function buildStoreIndex(stores: Store[]): Map<string, Store> {
   return map;
 }
 
+export function orderStores(stores: Store[]): Store[] {
+  const live = stores.filter((s) => s.syncState !== "deleted");
+  return [...live].sort((a, b) => {
+    const sa = typeof a.sort === "number" ? a.sort : 999999;
+    const sb = typeof b.sort === "number" ? b.sort : 999999;
+    if (sa !== sb) return sa - sb;
+    if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+    return (a.name || a.id).localeCompare(b.name || b.id);
+  });
+}
+
 export function findStoreByName(stores: Store[], name: string | null | undefined): Store | null {
   const key = storeKey(name);
   if (!key) return null;

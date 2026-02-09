@@ -19,7 +19,7 @@ import {
 import { notifyDbChanged, subscribeDbChanges } from "@/storage/notify";
 import { getTownHollywoodExampleBundle } from "@/examples/town-hollywood";
 import { buildRoomNameMap, ensureRoomNames, normalizeRoomName, orderRooms } from "@/lib/rooms";
-import { buildStoreIndex, normalizeStoreName, optionTotalWithStore, storeKey } from "@/lib/storePricing";
+import { buildStoreIndex, normalizeStoreName, optionTotalWithStore, orderStores, storeKey } from "@/lib/storePricing";
 import { moveAttachmentsParent, type AttachmentRecord } from "@/storage/attachments";
 
 type HomeMeta = NonNullable<ExportBundleV1["home"]>;
@@ -62,6 +62,7 @@ type DataContextValue = {
   items: Item[];
   options: Option[];
   stores: Store[];
+  orderedStores: Store[];
   unitPreference: UnitPreference;
   lastSyncAt: number | null;
   lastSyncSummary: SyncSummary | null;
@@ -72,6 +73,7 @@ type DataContextValue = {
   setUnitPreference: (unit: UnitPreference) => Promise<void>;
 
   reorderRooms: (orderedRoomIds: RoomId[]) => Promise<void>;
+  reorderStores: (orderedStoreIds: string[]) => Promise<void>;
   reorderItems: (roomId: RoomId, orderedItemIds: string[]) => Promise<void>;
   reorderMeasurements: (roomId: RoomId, orderedMeasurementIds: string[]) => Promise<void>;
   reorderOptions: (itemId: string, orderedOptionIds: string[]) => Promise<void>;
@@ -398,6 +400,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
           return {
             id: sid,
             name: normalizeStoreName((s as any)?.name) || "Store",
+            sort: coerceSort((s as any)?.sort),
             discountType: coerceDiscountType((s as any)?.discountType),
             discountValue: coerceNumberOrNull((s as any)?.discountValue),
             deliveryInfo: typeof (s as any)?.deliveryInfo === "string" ? (s as any).deliveryInfo : null,
@@ -750,9 +753,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       if (!name) return;
       const key = storeKey(name);
       if (storeByKey.has(key)) return;
+      const sort = nextStores.filter((s) => s.syncState !== "deleted").length + createdStores.length;
       const store: Store = {
         id: newId("s"),
         name,
+        sort,
         discountType: null,
         discountValue: null,
         deliveryInfo: null,
@@ -805,6 +810,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const orderedRooms = useMemo(() => orderRooms(rooms), [rooms]);
   const roomNameById = useMemo(() => buildRoomNameMap(rooms), [rooms]);
   const storeByName = useMemo(() => buildStoreIndex(stores), [stores]);
+  const orderedStores = useMemo(() => orderStores(stores), [stores]);
   const defaultRoomId = orderedRooms[0]?.id ?? DEFAULT_ROOMS[0];
 
   const resolveRoomId = useCallback(
@@ -1205,9 +1211,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const existing = allStores.find((s) => s.syncState !== "deleted" && storeKey(s.name) === key);
     if (existing) return existing.id;
     const ts = nowMs();
+    const sort = allStores.filter((s) => s.syncState !== "deleted").length;
     const store: Store = {
       id: newId("s"),
       name,
+      sort,
       discountType: null,
       discountValue: null,
       deliveryInfo: null,
@@ -1324,6 +1332,24 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       return { ...cur, sort: idx, updatedAt: ts, syncState: "dirty" };
     });
     await idbBulkPut("rooms", updates);
+    notifyDbChanged();
+  }, []);
+
+  const reorderStores = useCallback(async (orderedStoreIds: string[]) => {
+    const all = await idbGetAll<Store>("stores");
+    const storeById = new Map(all.filter((s) => s.syncState !== "deleted").map((s) => [s.id, s]));
+
+    const ordered = orderedStoreIds.filter((id) => storeById.has(id));
+    const currentIds = orderStores([...storeById.values()]).map((s) => s.id);
+    const remaining = currentIds.filter((id) => !ordered.includes(id));
+    const finalIds = [...ordered, ...remaining];
+
+    const ts = nowMs();
+    const updates: Store[] = finalIds.map((id, idx) => {
+      const cur = storeById.get(id)!;
+      return { ...cur, sort: idx, updatedAt: ts, syncState: "dirty" };
+    });
+    await idbBulkPut("stores", updates);
     notifyDbChanged();
   }, []);
 
@@ -1827,6 +1853,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       items,
       options,
       stores,
+      orderedStores,
       unitPreference,
       lastSyncAt,
       lastSyncSummary,
@@ -1835,6 +1862,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       savePlanner,
       setUnitPreference: saveUnitPreference,
       reorderRooms,
+      reorderStores,
       reorderItems,
       reorderMeasurements,
       reorderOptions,
@@ -1872,6 +1900,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       items,
       options,
       stores,
+      orderedStores,
       unitPreference,
       lastSyncAt,
       lastSyncSummary,
@@ -1880,6 +1909,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       savePlanner,
       saveUnitPreference,
       reorderRooms,
+      reorderStores,
       reorderItems,
       reorderMeasurements,
       reorderOptions,

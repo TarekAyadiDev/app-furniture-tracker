@@ -166,6 +166,8 @@ export type Store = {
   syncState?: SyncState;
 
   name: string;
+  // Manual ordering of stores (lower comes first).
+  sort?: number | null;
   discountType?: "amount" | "percent" | null;
   discountValue?: number | null;
   deliveryInfo?: string | null;
