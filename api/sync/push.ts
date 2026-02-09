@@ -36,6 +36,10 @@ function isRemoteId(id: any) {
   return typeof id === "string" && id.startsWith("rec");
 }
 
+function isNotFoundError(message: string) {
+  return /NOT_FOUND|does not exist/i.test(message || "");
+}
+
 function normalizeStoreValue(value: any): string | null {
   const name = typeof value === "string" ? value.trim() : "";
   return name ? name : null;
@@ -161,6 +165,7 @@ export default async function handler(req: any, res: any) {
     const itemCreates: any[] = [];
     const itemCreateLocalIds: string[] = [];
     const itemUpdates: any[] = [];
+    const itemUpdateLocalIds: string[] = [];
     const itemDeletes: string[] = [];
 
     for (const it of items) {
@@ -206,7 +211,10 @@ export default async function handler(req: any, res: any) {
       fields[SYNC_AT_FIELD] = syncAtIso;
       if (typeof it.priority === "number") fields[PRIORITY_FIELD] = Math.round(it.priority);
 
-      if (remoteId) itemUpdates.push({ id: remoteId, fields });
+      if (remoteId) {
+        itemUpdates.push({ id: remoteId, fields });
+        itemUpdateLocalIds.push(localId);
+      }
       else {
         itemCreates.push({ fields });
         itemCreateLocalIds.push(localId);
@@ -229,18 +237,44 @@ export default async function handler(req: any, res: any) {
       }
     }
     const itemUpdateResult = await safeUpdateRecords({ token, baseId, tableId, records: itemUpdates, typecast: true });
+    const itemRecreateRecords: any[] = [];
+    const itemRecreateLocalIds: string[] = [];
     if (itemUpdateResult.errors.length) {
       for (const err of itemUpdateResult.errors) {
         const title = itemUpdates[err.index]?.fields?.Title;
         const id = itemUpdates[err.index]?.id;
-        pushErrors.push({ entity: "item", action: "update", id, title, message: err.message });
+        if (isNotFoundError(err.message)) {
+          itemRecreateRecords.push({ fields: itemUpdates[err.index]?.fields || {} });
+          itemRecreateLocalIds.push(itemUpdateLocalIds[err.index]);
+        } else {
+          pushErrors.push({ entity: "item", action: "update", id, title, message: err.message });
+        }
       }
+    }
+    const itemRecreateResult = await safeCreateRecords({
+      token,
+      baseId,
+      tableId,
+      records: itemRecreateRecords,
+      typecast: true,
+    });
+    if (itemRecreateResult.errors.length) {
+      for (const err of itemRecreateResult.errors) {
+        const title = itemRecreateRecords[err.index]?.fields?.Title;
+        pushErrors.push({ entity: "item", action: "create", title, message: err.message });
+      }
+    }
+    for (let i = 0; i < itemRecreateResult.records.length; i++) {
+      const localId = itemRecreateLocalIds[i];
+      const rec = itemRecreateResult.records[i];
+      if (localId && rec && rec.id) itemIdMap[localId] = rec.id;
     }
 
     // --- Measurements ---
     const measCreates: any[] = [];
     const measCreateLocalIds: string[] = [];
     const measUpdates: any[] = [];
+    const measUpdateLocalIds: string[] = [];
     const measDeletes: string[] = [];
 
     for (const m of measurements) {
@@ -273,7 +307,10 @@ export default async function handler(req: any, res: any) {
       };
       fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
       fields[SYNC_AT_FIELD] = syncAtIso;
-      if (remoteId) measUpdates.push({ id: remoteId, fields });
+      if (remoteId) {
+        measUpdates.push({ id: remoteId, fields });
+        measUpdateLocalIds.push(localId);
+      }
       else {
         measCreates.push({ fields });
         measCreateLocalIds.push(localId);
@@ -295,18 +332,44 @@ export default async function handler(req: any, res: any) {
       }
     }
     const measUpdateResult = await safeUpdateRecords({ token, baseId, tableId, records: measUpdates, typecast: true });
+    const measRecreateRecords: any[] = [];
+    const measRecreateLocalIds: string[] = [];
     if (measUpdateResult.errors.length) {
       for (const err of measUpdateResult.errors) {
         const title = measUpdates[err.index]?.fields?.Title;
         const id = measUpdates[err.index]?.id;
-        pushErrors.push({ entity: "measurement", action: "update", id, title, message: err.message });
+        if (isNotFoundError(err.message)) {
+          measRecreateRecords.push({ fields: measUpdates[err.index]?.fields || {} });
+          measRecreateLocalIds.push(measUpdateLocalIds[err.index]);
+        } else {
+          pushErrors.push({ entity: "measurement", action: "update", id, title, message: err.message });
+        }
       }
+    }
+    const measRecreateResult = await safeCreateRecords({
+      token,
+      baseId,
+      tableId,
+      records: measRecreateRecords,
+      typecast: true,
+    });
+    if (measRecreateResult.errors.length) {
+      for (const err of measRecreateResult.errors) {
+        const title = measRecreateRecords[err.index]?.fields?.Title;
+        pushErrors.push({ entity: "measurement", action: "create", title, message: err.message });
+      }
+    }
+    for (let i = 0; i < measRecreateResult.records.length; i++) {
+      const localId = measRecreateLocalIds[i];
+      const rec = measRecreateResult.records[i];
+      if (localId && rec && rec.id) measurementIdMap[localId] = rec.id;
     }
 
     // --- Rooms (stored as Record Type = Note, one per room) ---
     const roomCreates: any[] = [];
     const roomCreateLocalIds: string[] = [];
     const roomUpdates: any[] = [];
+    const roomUpdateLocalIds: string[] = [];
 
     for (const r of rooms) {
       const rid = String(r.id || "").trim();
@@ -327,7 +390,10 @@ export default async function handler(req: any, res: any) {
       };
       fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
       fields[SYNC_AT_FIELD] = syncAtIso;
-      if (remoteId) roomUpdates.push({ id: remoteId, fields });
+      if (remoteId) {
+        roomUpdates.push({ id: remoteId, fields });
+        roomUpdateLocalIds.push(rid);
+      }
       else {
         roomCreates.push({ fields });
         roomCreateLocalIds.push(rid);
@@ -349,18 +415,44 @@ export default async function handler(req: any, res: any) {
       }
     }
     const roomUpdateResult = await safeUpdateRecords({ token, baseId, tableId, records: roomUpdates, typecast: true });
+    const roomRecreateRecords: any[] = [];
+    const roomRecreateLocalIds: string[] = [];
     if (roomUpdateResult.errors.length) {
       for (const err of roomUpdateResult.errors) {
         const title = roomUpdates[err.index]?.fields?.Room || roomUpdates[err.index]?.fields?.Title;
         const id = roomUpdates[err.index]?.id;
-        pushErrors.push({ entity: "room", action: "update", id, title, message: err.message });
+        if (isNotFoundError(err.message)) {
+          roomRecreateRecords.push({ fields: roomUpdates[err.index]?.fields || {} });
+          roomRecreateLocalIds.push(roomUpdateLocalIds[err.index]);
+        } else {
+          pushErrors.push({ entity: "room", action: "update", id, title, message: err.message });
+        }
       }
+    }
+    const roomRecreateResult = await safeCreateRecords({
+      token,
+      baseId,
+      tableId,
+      records: roomRecreateRecords,
+      typecast: true,
+    });
+    if (roomRecreateResult.errors.length) {
+      for (const err of roomRecreateResult.errors) {
+        const title = roomRecreateRecords[err.index]?.fields?.Room || roomRecreateRecords[err.index]?.fields?.Title;
+        pushErrors.push({ entity: "room", action: "create", title, message: err.message });
+      }
+    }
+    for (let i = 0; i < roomRecreateResult.records.length; i++) {
+      const localId = roomRecreateLocalIds[i];
+      const rec = roomRecreateResult.records[i];
+      if (localId && rec && rec.id) roomIdMap[localId] = rec.id;
     }
 
     // --- Stores ---
     const storeCreates: any[] = [];
     const storeCreateLocalIds: string[] = [];
     const storeUpdates: any[] = [];
+    const storeUpdateLocalIds: string[] = [];
     const storeDeletes: string[] = [];
 
     for (const s of stores) {
@@ -395,7 +487,10 @@ export default async function handler(req: any, res: any) {
       fields[SYNC_SOURCE_FIELD] = SYNC_SOURCE;
       fields[SYNC_AT_FIELD] = syncAtIso;
 
-      if (remoteId) storeUpdates.push({ id: remoteId, fields });
+      if (remoteId) {
+        storeUpdates.push({ id: remoteId, fields });
+        storeUpdateLocalIds.push(localId);
+      }
       else {
         storeCreates.push({ fields });
         storeCreateLocalIds.push(localId);
@@ -417,18 +512,44 @@ export default async function handler(req: any, res: any) {
       }
     }
     const storeUpdateResult = await safeUpdateRecords({ token, baseId, tableId, records: storeUpdates, typecast: true });
+    const storeRecreateRecords: any[] = [];
+    const storeRecreateLocalIds: string[] = [];
     if (storeUpdateResult.errors.length) {
       for (const err of storeUpdateResult.errors) {
         const title = storeUpdates[err.index]?.fields?.Title;
         const id = storeUpdates[err.index]?.id;
-        pushErrors.push({ entity: "store", action: "update", id, title, message: err.message });
+        if (isNotFoundError(err.message)) {
+          storeRecreateRecords.push({ fields: storeUpdates[err.index]?.fields || {} });
+          storeRecreateLocalIds.push(storeUpdateLocalIds[err.index]);
+        } else {
+          pushErrors.push({ entity: "store", action: "update", id, title, message: err.message });
+        }
       }
+    }
+    const storeRecreateResult = await safeCreateRecords({
+      token,
+      baseId,
+      tableId,
+      records: storeRecreateRecords,
+      typecast: true,
+    });
+    if (storeRecreateResult.errors.length) {
+      for (const err of storeRecreateResult.errors) {
+        const title = storeRecreateRecords[err.index]?.fields?.Title;
+        pushErrors.push({ entity: "store", action: "create", title, message: err.message });
+      }
+    }
+    for (let i = 0; i < storeRecreateResult.records.length; i++) {
+      const localId = storeRecreateLocalIds[i];
+      const rec = storeRecreateResult.records[i];
+      if (localId && rec && rec.id) storeIdMap[localId] = rec.id;
     }
 
     // --- Options ---
     const optCreates: any[] = [];
     const optCreateLocalIds: string[] = [];
     const optUpdates: any[] = [];
+    const optUpdateLocalIds: string[] = [];
     const optDeletes: string[] = [];
 
     // Track selected option per item so we can update item.Selected Option Id
@@ -484,6 +605,7 @@ export default async function handler(req: any, res: any) {
 
       if (remoteId) {
         optUpdates.push({ id: remoteId, fields });
+        optUpdateLocalIds.push(localId);
         if (meta.selected) selectedOptionByItem[parentRemote] = remoteId;
       } else {
         optCreates.push({ fields });
@@ -508,12 +630,37 @@ export default async function handler(req: any, res: any) {
       }
     }
     const optUpdateResult = await safeUpdateRecords({ token, baseId, tableId, records: optUpdates, typecast: true });
+    const optRecreateRecords: any[] = [];
+    const optRecreateLocalIds: string[] = [];
     if (optUpdateResult.errors.length) {
       for (const err of optUpdateResult.errors) {
         const title = optUpdates[err.index]?.fields?.Title;
         const id = optUpdates[err.index]?.id;
-        pushErrors.push({ entity: "option", action: "update", id, title, message: err.message });
+        if (isNotFoundError(err.message)) {
+          optRecreateRecords.push({ fields: optUpdates[err.index]?.fields || {} });
+          optRecreateLocalIds.push(optUpdateLocalIds[err.index]);
+        } else {
+          pushErrors.push({ entity: "option", action: "update", id, title, message: err.message });
+        }
       }
+    }
+    const optRecreateResult = await safeCreateRecords({
+      token,
+      baseId,
+      tableId,
+      records: optRecreateRecords,
+      typecast: true,
+    });
+    if (optRecreateResult.errors.length) {
+      for (const err of optRecreateResult.errors) {
+        const title = optRecreateRecords[err.index]?.fields?.Title;
+        pushErrors.push({ entity: "option", action: "create", title, message: err.message });
+      }
+    }
+    for (let i = 0; i < optRecreateResult.records.length; i++) {
+      const localId = optRecreateLocalIds[i];
+      const rec = optRecreateResult.records[i];
+      if (localId && rec && rec.id) optionIdMap[localId] = rec.id;
     }
 
     // After creates, we can't reliably know which created option was selected without an id field.
@@ -540,15 +687,15 @@ export default async function handler(req: any, res: any) {
           stores: storeIdMap,
         },
         counts: {
-          createdItems: itemCreateResult.records.filter(Boolean).length,
+          createdItems: itemCreateResult.records.filter(Boolean).length + itemRecreateResult.records.filter(Boolean).length,
           updatedItems: itemUpdateResult.records.filter(Boolean).length,
-          createdOptions: optCreateResult.records.filter(Boolean).length,
+          createdOptions: optCreateResult.records.filter(Boolean).length + optRecreateResult.records.filter(Boolean).length,
           updatedOptions: optUpdateResult.records.filter(Boolean).length,
-          createdMeasurements: measCreateResult.records.filter(Boolean).length,
+          createdMeasurements: measCreateResult.records.filter(Boolean).length + measRecreateResult.records.filter(Boolean).length,
           updatedMeasurements: measUpdateResult.records.filter(Boolean).length,
-          createdRooms: roomCreateResult.records.filter(Boolean).length,
+          createdRooms: roomCreateResult.records.filter(Boolean).length + roomRecreateResult.records.filter(Boolean).length,
           updatedRooms: roomUpdateResult.records.filter(Boolean).length,
-          createdStores: storeCreateResult.records.filter(Boolean).length,
+          createdStores: storeCreateResult.records.filter(Boolean).length + storeRecreateResult.records.filter(Boolean).length,
           updatedStores: storeUpdateResult.records.filter(Boolean).length,
           deletedItems: deleted.items.length,
           deletedOptions: deleted.options.length,
