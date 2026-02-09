@@ -87,6 +87,17 @@ function formatSyncCounts(counts: Record<string, number> | null | undefined) {
   return entries.map(([k, v]) => `${k} ${v}`).join(", ");
 }
 
+function formatPushWarnings(
+  errors: Array<{ entity: string; action: string; title?: string; message: string }> | null | undefined,
+): string | null {
+  if (!errors || !errors.length) return null;
+  const first = errors[0];
+  const trimmedMsg = String(first.message || "").replace(/^Airtable error \d+:\s*/i, "");
+  const label = `${first.entity} ${first.action}${first.title ? ` (${first.title})` : ""}`;
+  const extra = errors.length > 1 ? ` (+${errors.length - 1} more)` : "";
+  return `${label}: ${trimmedMsg || "Unknown error"}${extra}`;
+}
+
 export default function Settings() {
   const { toast } = useToast();
   const {
@@ -178,7 +189,11 @@ export default function Settings() {
     setPushing(true);
     try {
       const res = await pushNow();
-      toast({ title: "Pushed", description: `Pushed: ${formatSyncCounts(res.push)}` });
+      const warning = formatPushWarnings(res.pushErrors);
+      toast({
+        title: warning ? "Pushed with errors" : "Pushed",
+        description: warning ? `Pushed: ${formatSyncCounts(res.push)} · ${warning}` : `Pushed: ${formatSyncCounts(res.push)}`,
+      });
       void runHealth();
       return res;
     } catch (err: any) {
@@ -196,7 +211,11 @@ export default function Settings() {
     setResetting(true);
     try {
       const res = await pushNow("reset");
-      toast({ title: "Reset + pushed", description: `Pushed: ${formatSyncCounts(res.push)}` });
+      const warning = formatPushWarnings(res.pushErrors);
+      toast({
+        title: warning ? "Reset + pushed with errors" : "Reset + pushed",
+        description: warning ? `Pushed: ${formatSyncCounts(res.push)} · ${warning}` : `Pushed: ${formatSyncCounts(res.push)}`,
+      });
       void runHealth();
       return res;
     } catch (err: any) {
@@ -571,7 +590,7 @@ export default function Settings() {
         ) : null}
         <div className="mt-3 text-xs text-muted-foreground">
           Pending changes: items {dirtyCounts.items}, options {dirtyCounts.options}, measurements {dirtyCounts.measurements}, rooms{" "}
-          {dirtyCounts.rooms}.
+          {dirtyCounts.rooms}, stores {dirtyCounts.stores}.
         </div>
         <div className="mt-2 text-xs text-muted-foreground">
           Last sync action:{" "}

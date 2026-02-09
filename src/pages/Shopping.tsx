@@ -10,9 +10,9 @@ import { useData } from "@/data/DataContext";
 import { type ItemStatus, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
+import { storeKey } from "@/lib/storePricing";
 
 const RECENT_ROOMS_KEY = "ft_recentRooms";
-const RECENT_STORES_KEY = "ft_recentStores";
 
 function loadRecents(key: string): string[] {
   try {
@@ -36,10 +36,19 @@ function pushRecent(key: string, value: string, max = 6) {
 export default function Shopping() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, createItem } = useData();
+  const { orderedRooms, roomNameById, items, stores, createItem } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
   const validRoomIds = useMemo(() => new Set(orderedRoomIds), [orderedRoomIds]);
+  const orderedStores = useMemo(
+    () =>
+      stores
+        .filter((s) => s.syncState !== "deleted")
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [stores],
+  );
+  const validStoreKeys = useMemo(() => new Set(orderedStores.map((s) => storeKey(s.name))), [orderedStores]);
 
   const nameRef = useRef<HTMLInputElement | null>(null);
 
@@ -47,17 +56,24 @@ export default function Shopping() {
   const [room, setRoom] = useState<RoomId>(() => loadRecents(RECENT_ROOMS_KEY)[0] || "Living");
   const [status, setStatus] = useState<ItemStatus>("Shortlist");
   const [price, setPrice] = useState<string>("");
-  const [store, setStore] = useState<string>(() => loadRecents(RECENT_STORES_KEY)[0] || "");
+  const [store, setStore] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
   const [recentRooms, setRecentRooms] = useState<string[]>(() => loadRecents(RECENT_ROOMS_KEY));
-  const [recentStores, setRecentStores] = useState<string[]>(() => loadRecents(RECENT_STORES_KEY));
 
   useEffect(() => {
     if (!orderedRoomIds.length) return;
     setRoom((cur) => (validRoomIds.has(cur) ? cur : orderedRoomIds[0]));
     setRecentRooms(loadRecents(RECENT_ROOMS_KEY).filter((r) => validRoomIds.has(r)));
   }, [orderedRoomIds, validRoomIds]);
+
+  useEffect(() => {
+    if (!orderedStores.length) {
+      setStore("");
+      return;
+    }
+    setStore((cur) => (validStoreKeys.has(storeKey(cur)) ? cur : ""));
+  }, [orderedStores, validStoreKeys]);
 
   const recentItems = useMemo(() => {
     return [...items]
@@ -87,9 +103,7 @@ export default function Shopping() {
     });
 
     pushRecent(RECENT_ROOMS_KEY, room);
-    if (store.trim()) pushRecent(RECENT_STORES_KEY, store.trim());
     setRecentRooms(loadRecents(RECENT_ROOMS_KEY).filter((r) => validRoomIds.has(r)));
-    setRecentStores(loadRecents(RECENT_STORES_KEY));
 
     setName("");
     setPrice("");
@@ -163,27 +177,19 @@ export default function Shopping() {
 
           <div className="space-y-1.5">
             <label htmlFor="shop_store" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Store (optional)</label>
-            <Input
+            <select
               id="shop_store"
               value={store}
               onChange={(e) => setStore(e.target.value)}
-              placeholder="IKEA, Target, Article..."
-              className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-            />
-            {recentStores.length ? (
-              <div className="flex flex-wrap gap-2 pt-1">
-                {recentStores.slice(0, 6).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setStore(s)}
-                    className="rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-95"
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            ) : null}
+              className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">(none)</option>
+              {orderedStores.map((s) => (
+                <option key={s.id} value={s.name}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="space-y-1.5">

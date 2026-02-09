@@ -16,6 +16,8 @@ function titleForPath(pathname: string) {
       return "Rooms";
     case "/review":
       return "Review";
+    case "/stores":
+      return "Stores";
     case "/budget":
       return "Budget";
     case "/settings":
@@ -37,6 +39,8 @@ function subtitleForPath(pathname: string) {
       return "Investment Tracker";
     case "/review":
       return "Decision Time";
+    case "/stores":
+      return "Policies & Perks";
     case "/settings":
       return "Preferences";
     default:

@@ -19,6 +19,7 @@ import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provena
 import { useToast } from "@/hooks/use-toast";
 import { shareData } from "@/lib/share";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
+import { buildStoreIndex, optionTotalWithStore, storeKey } from "@/lib/storePricing";
 
 function optionPreDiscountTotalOrNull(o: Option): number | null {
   const hasAny =
@@ -42,16 +43,6 @@ function optionDiscountAmount(o: Option): number {
     }
   }
   return typeof o.discount === "number" ? o.discount : 0;
-}
-
-function optionTotalOrNull(o: Option): number | null {
-  const base = optionPreDiscountTotalOrNull(o);
-  if (base === null) return null;
-  return base - optionDiscountAmount(o);
-}
-
-function optionFinalTotal(o: Option) {
-  return optionTotalOrNull(o) ?? 0;
 }
 
 function optionDiscountLabel(o: Option) {
@@ -126,7 +117,7 @@ function formatSpecs(specs: Option["specs"]) {
     .join(", ");
 }
 
-function pickBestOptionId(options: Option[]): string | null {
+function pickBestOptionId(options: Option[], getTotal: (opt: Option) => number | null): string | null {
   if (!options.length) return null;
   const hasPriority = options.some((o) => typeof o.priority === "number");
   const sorted = options.slice().sort((a, b) => {
@@ -135,8 +126,8 @@ function pickBestOptionId(options: Option[]): string | null {
       const pb = typeof b.priority === "number" ? b.priority : 999999;
       if (pa !== pb) return pa - pb;
     }
-    const ta = optionTotalOrNull(a);
-    const tb = optionTotalOrNull(b);
+    const ta = getTotal(a);
+    const tb = getTotal(b);
     if (ta === null && tb !== null) return 1;
     if (tb === null && ta !== null) return -1;
     if (ta !== null && tb !== null && ta !== tb) return ta - tb;
@@ -165,6 +156,7 @@ export default function ItemDetail() {
     measurements,
     items,
     options,
+    stores,
     reorderOptions,
     renameCategory,
     createItem,
@@ -178,8 +170,18 @@ export default function ItemDetail() {
   } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
+  const storeByName = useMemo(() => buildStoreIndex(stores), [stores]);
+  const orderedStores = useMemo(
+    () =>
+      stores
+        .filter((s) => s.syncState !== "deleted")
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [stores],
+  );
 
   const item = useMemo(() => items.find((x) => x.id === id), [items, id]);
+  const storeForItem = useMemo(() => (item ? storeByName.get(storeKey(item.store)) || null : null), [item, storeByName]);
   const itemOptions = useMemo(
     () =>
       options
@@ -192,6 +194,13 @@ export default function ItemDetail() {
         }),
     [options, id],
   );
+
+  const optionTotalOrNull = useMemo(
+    () => (opt: Option) => optionTotalWithStore(opt, storeByName.get(storeKey(opt.store)) || null),
+    [storeByName],
+  );
+
+  const optionFinalTotal = useMemo(() => (opt: Option) => optionTotalOrNull(opt) ?? 0, [optionTotalOrNull]);
 
   const [itemAttachments, setItemAttachments] = useState<AttachmentRecord[]>([]);
   const [optionAttachments, setOptionAttachments] = useState<Record<string, AttachmentRecord[]>>({});
@@ -266,7 +275,7 @@ export default function ItemDetail() {
 
   const optionOnly = Boolean(optionOnlyOption);
 
-  const bestOptionId = useMemo(() => pickBestOptionId(filteredOptions), [filteredOptions]);
+  const bestOptionId = useMemo(() => pickBestOptionId(filteredOptions, optionTotalOrNull), [filteredOptions, optionTotalOrNull]);
 
   const optionsToRender = useMemo(() => {
     if (optionOnlyOption) return [optionOnlyOption];
@@ -413,8 +422,12 @@ export default function ItemDetail() {
 
   const priceValue = parseNumberOrNull(price);
   const discountValueNum = parseNumberOrNull(discountValue);
-  const effectivePriceValue =
-    priceValue === null ? null : Math.max(0, priceValue - (computeDiscountAmount(priceValue, discountType, discountValueNum) || 0));
+  const itemDiscountAmount = computeDiscountAmount(priceValue, discountType, discountValueNum) || 0;
+  const storeDiscountAmount =
+    storeForItem && (storeForItem.discountType === "amount" || storeForItem.discountType === "percent")
+      ? computeDiscountAmount(priceValue, storeForItem.discountType, storeForItem.discountValue ?? null) || 0
+      : 0;
+  const effectivePriceValue = priceValue === null ? null : Math.max(0, priceValue - itemDiscountAmount - storeDiscountAmount);
   const inheritedItemPhotos = selectedOptionId ? optionAttachments[selectedOptionId] || [] : [];
   const inheritedItemPhotoLabel = selectedOption ? `Using photos from "${selectedOption.title}".` : undefined;
 
@@ -578,13 +591,18 @@ export default function ItemDetail() {
 
   async function onShareItem() {
     const roomLabel = roomNameById.get(item.room) || item.room;
-    const shareDiscount = computeDiscountAmount(
-      typeof item.price === "number" ? item.price : null,
+    const priceVal = typeof item.price === "number" ? item.price : null;
+    const itemDiscount = computeDiscountAmount(
+      priceVal,
       item.discountType === "percent" ? "percent" : "amount",
       typeof item.discountValue === "number" ? item.discountValue : null,
-    );
-    const shareTotal =
-      typeof item.price === "number" ? Math.max(0, item.price - (shareDiscount || 0)) : null;
+    ) || 0;
+    const storeDiscount =
+      storeForItem && (storeForItem.discountType === "amount" || storeForItem.discountType === "percent")
+        ? computeDiscountAmount(priceVal, storeForItem.discountType, storeForItem.discountValue ?? null) || 0
+        : 0;
+    const shareDiscount = itemDiscount + storeDiscount;
+    const shareTotal = priceVal === null ? null : Math.max(0, priceVal - shareDiscount);
     const parts = [
       item.name,
       roomLabel ? `Room: ${roomLabel}` : "",
@@ -1104,8 +1122,13 @@ export default function ItemDetail() {
                   {(() => {
                     const priceVal = parseNumberOrNull(price);
                     const v = parseNumberOrNull(discountValue);
-                    const amt = computeDiscountAmount(priceVal, discountType, v);
-                    return amt ? `Savings: ${formatMoneyUSD(amt)}` : "Savings: —";
+                    const itemAmt = computeDiscountAmount(priceVal, discountType, v) || 0;
+                    const storeAmt =
+                      storeForItem && (storeForItem.discountType === "amount" || storeForItem.discountType === "percent")
+                        ? computeDiscountAmount(priceVal, storeForItem.discountType, storeForItem.discountValue ?? null) || 0
+                        : 0;
+                    const total = itemAmt + storeAmt;
+                    return total ? `Savings: ${formatMoneyUSD(total)}${storeAmt ? " (incl. store)" : ""}` : "Savings: —";
                   })()}
                 </div>
               ) : null}
@@ -1114,11 +1137,8 @@ export default function ItemDetail() {
               <Label>Effective total</Label>
               <div className="flex h-12 items-center rounded-md border bg-background px-3 text-sm">
                 {(() => {
-                  const priceVal = parseNumberOrNull(price);
-                  const v = parseNumberOrNull(discountValue);
-                  const amt = computeDiscountAmount(priceVal, discountType, v);
-                  if (priceVal === null) return "—";
-                  return formatMoneyUSD(Math.max(0, priceVal - (amt || 0)));
+                  if (priceValue === null) return "—";
+                  return formatMoneyUSD(effectivePriceValue ?? priceValue);
                 })()}
               </div>
               <div className="text-xs text-muted-foreground">Used for budget totals.</div>
@@ -1128,13 +1148,23 @@ export default function ItemDetail() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="item_store">Store</Label>
-              <Input
+              <select
                 id="item_store"
                 value={store}
-                onChange={(e) => setStore(e.target.value)}
-                onBlur={() => void commit({ store: store.trim() || null })}
-                className="h-12 text-base"
-              />
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setStore(next);
+                  void commit({ store: next.trim() || null });
+                }}
+                className="h-12 w-full rounded-md border bg-background px-3 text-base"
+              >
+                <option value="">(none)</option>
+                {orderedStores.map((s) => (
+                  <option key={s.id} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="item_link">Link</Label>
@@ -1148,6 +1178,56 @@ export default function ItemDetail() {
               />
             </div>
           </div>
+
+          {storeForItem ? (
+            <Card className="rounded-2xl border border-border/50 bg-background/70 p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-heading text-base font-semibold text-foreground">Store perks</h3>
+                  <p className="text-xs text-muted-foreground">Applied alongside item discounts.</p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+                {typeof storeForItem.discountValue === "number" && storeForItem.discountValue > 0 ? (
+                  <div>
+                    <div className="font-semibold text-foreground">Discount</div>
+                    <div>
+                      {storeForItem.discountType === "percent"
+                        ? `${storeForItem.discountValue}%`
+                        : formatMoneyUSD(storeForItem.discountValue)}
+                    </div>
+                  </div>
+                ) : null}
+                {storeForItem.deliveryInfo ? (
+                  <div>
+                    <div className="font-semibold text-foreground">Delivery</div>
+                    <div>{storeForItem.deliveryInfo}</div>
+                  </div>
+                ) : null}
+                {storeForItem.extraWarranty ? (
+                  <div>
+                    <div className="font-semibold text-foreground">Extra warranty</div>
+                    <div>{storeForItem.extraWarranty}</div>
+                  </div>
+                ) : null}
+                {storeForItem.trial ? (
+                  <div>
+                    <div className="font-semibold text-foreground">Trial</div>
+                    <div>{storeForItem.trial}</div>
+                  </div>
+                ) : null}
+                {storeForItem.apr ? (
+                  <div>
+                    <div className="font-semibold text-foreground">APR</div>
+                    <div>{storeForItem.apr}</div>
+                  </div>
+                ) : null}
+              </div>
+              {storeForItem.notes ? (
+                <div className="mt-3 whitespace-pre-wrap text-xs text-muted-foreground">{storeForItem.notes}</div>
+              ) : null}
+            </Card>
+          ) : null}
 
           <div className="space-y-1.5">
             <Label>Dimensions (in)</Label>
@@ -1619,11 +1699,18 @@ export default function ItemDetail() {
                             <div className="grid grid-cols-2 gap-3">
                               <div className="space-y-1.5">
                                 <Label>Store</Label>
-                                <Input
-                                  defaultValue={o.store || ""}
-                                  className="h-11 text-base"
-                                  onBlur={(e) => void updateOption(o.id, { store: e.target.value.trim() || null })}
-                                />
+                                <select
+                                  value={o.store || ""}
+                                  onChange={(e) => void updateOption(o.id, { store: e.target.value.trim() || null })}
+                                  className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                                >
+                                  <option value="">(none)</option>
+                                  {orderedStores.map((s) => (
+                                    <option key={s.id} value={s.name}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
                               <div className="space-y-1.5">
                                 <Label>Promo code</Label>

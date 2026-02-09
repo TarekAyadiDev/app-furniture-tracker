@@ -1,9 +1,9 @@
-import type { Item, Measurement, Option, Room } from "@/lib/domain";
+import type { Item, Measurement, Option, Room, Store } from "@/lib/domain";
 
 const DB_NAME = "furnishing-tracker";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
-type StoreName = "items" | "options" | "measurements" | "rooms" | "meta" | "attachments";
+type StoreName = "items" | "options" | "measurements" | "rooms" | "stores" | "meta" | "attachments";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -36,6 +36,12 @@ function openDb(): Promise<IDBDatabase> {
 
       if (!db.objectStoreNames.contains("rooms")) {
         const store = db.createObjectStore("rooms", { keyPath: "id" });
+        store.createIndex("updatedAt", "updatedAt", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains("stores")) {
+        const store = db.createObjectStore("stores", { keyPath: "id" });
+        store.createIndex("name", "name", { unique: false });
         store.createIndex("updatedAt", "updatedAt", { unique: false });
       }
 
@@ -130,11 +136,12 @@ export async function idbBulkPut<T>(store: StoreName, values: T[]): Promise<void
 }
 
 export async function idbResetAll(): Promise<void> {
-  await withTx(["items", "options", "measurements", "rooms", "attachments", "meta"], "readwrite", async (tx) => {
+  await withTx(["items", "options", "measurements", "rooms", "stores", "attachments", "meta"], "readwrite", async (tx) => {
     tx.objectStore("items").clear();
     tx.objectStore("options").clear();
     tx.objectStore("measurements").clear();
     tx.objectStore("rooms").clear();
+    tx.objectStore("stores").clear();
     tx.objectStore("attachments").clear();
     tx.objectStore("meta").clear();
     return;
@@ -146,20 +153,22 @@ export type DbSnapshot = {
   options: Option[];
   measurements: Measurement[];
   rooms: Room[];
+  stores: Store[];
   meta: Record<string, unknown>;
 };
 
 export async function idbGetSnapshot(): Promise<DbSnapshot> {
-  const [items, options, measurements, rooms, metaRaw] = await Promise.all([
+  const [items, options, measurements, rooms, stores, metaRaw] = await Promise.all([
     idbGetAll<Item>("items"),
     idbGetAll<Option>("options"),
     idbGetAll<Measurement>("measurements"),
     idbGetAll<Room>("rooms"),
+    idbGetAll<Store>("stores"),
     idbGetAll<{ key: string; value: unknown }>("meta"),
   ]);
   const meta: Record<string, unknown> = {};
   for (const row of metaRaw) meta[row.key] = row.value;
-  return { items, options, measurements, rooms, meta };
+  return { items, options, measurements, rooms, stores, meta };
 }
 
 export async function idbSetMeta(key: string, value: unknown): Promise<void> {

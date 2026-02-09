@@ -1,53 +1,11 @@
 import { useMemo } from "react";
 import { Card } from "@/components/ui/card";
-import type { Item, ItemStatus, Option, RoomId } from "@/lib/domain";
+import type { Item, ItemStatus, Option, RoomId, Store } from "@/lib/domain";
 import { formatMoneyUSD } from "@/lib/format";
 import { useData } from "@/data/DataContext";
+import { buildStoreIndex, itemDiscountAmountWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
 
 type Totals = { planned: number; selected: number; spent: number; discount: number; missingPrice: number; count: number };
-
-function optionPreDiscountTotalOrNull(opt: Option): number | null {
-  const hasAny =
-    typeof opt.price === "number" ||
-    typeof opt.shipping === "number" ||
-    typeof opt.taxEstimate === "number";
-  if (!hasAny) return null;
-  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0);
-}
-
-function optionDiscountAmount(opt: Option): number {
-  const value = typeof opt.discountValue === "number" ? opt.discountValue : null;
-  const type = opt.discountType === "percent" || opt.discountType === "amount" ? opt.discountType : null;
-  if (value !== null && value > 0) {
-    if (type === "amount") return value;
-    if (type === "percent") {
-      const base = optionPreDiscountTotalOrNull(opt);
-      if (base === null) return 0;
-      if (value >= 100) return base;
-      return (base * value) / 100;
-    }
-  }
-  return typeof opt.discount === "number" ? opt.discount : 0;
-}
-
-function optionTotalOrNull(opt: Option): number | null {
-  const base = optionPreDiscountTotalOrNull(opt);
-  if (base === null) return null;
-  return base - optionDiscountAmount(opt);
-}
-
-function itemDiscountAmount(item: Item): number | null {
-  const value = typeof item.discountValue === "number" ? item.discountValue : null;
-  if (value === null || value <= 0) return null;
-  if (item.discountType === "amount") return value;
-  if (item.discountType === "percent") {
-    const price = typeof item.price === "number" ? item.price : null;
-    if (price === null) return null;
-    if (value >= 100) return null;
-    return (price * value) / 100;
-  }
-  return null;
-}
 
 function bucketForStatus(status: ItemStatus): keyof Totals | null {
   if (status === "Idea" || status === "Shortlist") return "planned";
@@ -56,7 +14,7 @@ function bucketForStatus(status: ItemStatus): keyof Totals | null {
   return null;
 }
 
-function addLine(t: Totals, item: Item, selectedTotals: Map<string, number | null>) {
+function addLine(t: Totals, item: Item, selectedTotals: Map<string, number | null>, storeByName: Map<string, Store>) {
   t.count += 1;
   const itemPrice = typeof item.price === "number" ? item.price : null;
   const fallbackPrice = selectedTotals.get(item.id) ?? null;
@@ -65,7 +23,8 @@ function addLine(t: Totals, item: Item, selectedTotals: Map<string, number | nul
     t.missingPrice += 1;
     return;
   }
-  const discount = itemPrice !== null ? itemDiscountAmount(item) : null;
+  const store = storeByName.get(storeKey(item.store)) || null;
+  const discount = itemPrice !== null ? itemDiscountAmountWithStore(item, store) : null;
   if (discount) t.discount += discount * (item.qty || 1);
   const effective = Math.max(0, price - (discount || 0));
   const b = bucketForStatus(item.status);
@@ -74,9 +33,10 @@ function addLine(t: Totals, item: Item, selectedTotals: Map<string, number | nul
 }
 
 export default function Budget() {
-  const { items, options, orderedRooms, roomNameById } = useData();
+  const { items, options, orderedRooms, roomNameById, stores } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
+  const storeByName = useMemo(() => buildStoreIndex(stores), [stores]);
 
   const activeItems = useMemo(() => items.filter((i) => i.syncState !== "deleted"), [items]);
 
@@ -92,36 +52,37 @@ export default function Budget() {
       const list = byItem.get(it.id) || [];
       let selected = it.selectedOptionId ? list.find((o) => o.id === it.selectedOptionId) : null;
       if (!selected) selected = list.find((o) => o.selected) || null;
-      totals.set(it.id, selected ? optionTotalOrNull(selected) : null);
+      const store = selected ? storeByName.get(storeKey(selected.store)) || null : null;
+      totals.set(it.id, selected ? optionTotalWithStore(selected, store) : null);
     }
     return totals;
-  }, [activeItems, options]);
+  }, [activeItems, options, storeByName]);
 
   const totals = useMemo(() => {
     const t: Totals = { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 };
-    for (const it of activeItems) addLine(t, it, selectedOptionTotals);
+    for (const it of activeItems) addLine(t, it, selectedOptionTotals, storeByName);
     return t;
-  }, [activeItems, selectedOptionTotals]);
+  }, [activeItems, selectedOptionTotals, storeByName]);
 
   const byRoom = useMemo(() => {
     const out = new Map<RoomId, Totals>();
     for (const r of orderedRoomIds) out.set(r, { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 });
     for (const it of activeItems) {
       const t = out.get(it.room);
-      if (t) addLine(t, it, selectedOptionTotals);
+      if (t) addLine(t, it, selectedOptionTotals, storeByName);
     }
     return out;
-  }, [activeItems, orderedRoomIds, selectedOptionTotals]);
+  }, [activeItems, orderedRoomIds, selectedOptionTotals, storeByName]);
 
   const byCategory = useMemo(() => {
     const out = new Map<string, Totals>();
     for (const it of activeItems) {
       const key = (it.category || "Other").trim() || "Other";
       if (!out.has(key)) out.set(key, { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 });
-      addLine(out.get(key)!, it, selectedOptionTotals);
+      addLine(out.get(key)!, it, selectedOptionTotals, storeByName);
     }
     return [...out.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [activeItems, selectedOptionTotals]);
+  }, [activeItems, selectedOptionTotals, storeByName]);
 
   return (
     <div className="space-y-5">

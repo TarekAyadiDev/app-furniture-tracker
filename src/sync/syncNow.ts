@@ -1,4 +1,4 @@
-import type { ExportBundleV1, Item, Measurement, Option, Room } from "@/lib/domain";
+import type { ExportBundleV1, Item, Measurement, Option, Room, Store } from "@/lib/domain";
 import { newId } from "@/lib/id";
 import { idbDelete, idbGet, idbGetAll, idbGetAllByIndex, idbGetSnapshot, idbPut, idbSetMeta } from "@/storage/idb";
 import { notifyDbChanged } from "@/storage/notify";
@@ -21,8 +21,10 @@ type PushResponse = {
     options?: Record<string, string>;
     measurements?: Record<string, string>;
     rooms?: Record<string, string>;
+    stores?: Record<string, string>;
   };
   counts?: Record<string, number>;
+  errors?: Array<{ entity: string; action: string; id?: string; title?: string; message: string }>;
   message?: string;
 };
 
@@ -133,12 +135,24 @@ async function rekeyMeasurement(localId: string, remoteId: string) {
   await idbDelete("measurements", localId);
 }
 
+async function rekeyStore(localId: string, remoteId: string) {
+  const s = await idbGet<Store>("stores", localId);
+  if (!s) return;
+  const next: Store = { ...s, id: remoteId, remoteId, syncState: "clean" };
+  await idbPut("stores", next);
+  await idbDelete("stores", localId);
+}
+
 async function applyPulledBundle(bundle: ExportBundleV1) {
   // Upsert remote records into local DB and mark them clean.
   for (const r of bundle.rooms || []) {
     const name = (r as any).name || r.id;
     const room: Room = { ...r, name, syncState: "clean", remoteId: r.remoteId || r.id || null };
     await idbPut("rooms", room);
+  }
+  for (const s of (bundle as any).stores || []) {
+    const store: Store = { ...s, syncState: "clean", remoteId: (s as any).remoteId || (s as any).id || null };
+    await idbPut("stores", store);
   }
   for (const m of bundle.measurements || []) {
     const meas: Measurement = { ...m, syncState: "clean", remoteId: m.remoteId || m.id || null };
@@ -210,6 +224,7 @@ async function pushChanges(mode: PushMode = "commit") {
       })),
     measurements: snap.measurements.filter((x) => x.syncState !== "clean"),
     rooms: snap.rooms.filter((x) => x.syncState !== "clean"),
+    stores: snap.stores.filter((x) => x.syncState !== "clean"),
   };
 
   const pushRes = await fetchWithTimeout("/api/sync/push", {
@@ -225,6 +240,10 @@ async function pushChanges(mode: PushMode = "commit") {
   }
 
   const created = pushJson.created || {};
+  const failedUpdateIds = new Set<string>();
+  for (const err of pushJson.errors || []) {
+    if (err.action === "update" && typeof err.id === "string" && err.id) failedUpdateIds.add(err.id);
+  }
 
   // Rekey newly-created records so all devices converge on Airtable record ids.
   for (const [localId, remoteId] of Object.entries(created.items || {})) {
@@ -240,26 +259,43 @@ async function pushChanges(mode: PushMode = "commit") {
     const r = await idbGet<Room>("rooms", roomId);
     if (r) await idbPut("rooms", { ...r, remoteId, syncState: "clean" });
   }
+  for (const [localId, remoteId] of Object.entries(created.stores || {})) {
+    await rekeyStore(localId, remoteId);
+  }
 
   // Mark updated records clean; delete locally-deleted records.
   const snapAfter = await idbGetSnapshot();
   for (const it of snapAfter.items) {
-    if (it.syncState === "dirty" && isRecordId(it.id)) await idbPut("items", { ...it, syncState: "clean" });
+    if (it.syncState === "dirty" && isRecordId(it.id) && !failedUpdateIds.has(it.id)) {
+      await idbPut("items", { ...it, syncState: "clean" });
+    }
     if (it.syncState === "deleted") await idbDelete("items", it.id);
   }
   for (const o of snapAfter.options) {
-    if (o.syncState === "dirty" && isRecordId(o.id)) await idbPut("options", { ...o, syncState: "clean" });
+    if (o.syncState === "dirty" && isRecordId(o.id) && !failedUpdateIds.has(o.id)) {
+      await idbPut("options", { ...o, syncState: "clean" });
+    }
     if (o.syncState === "deleted") await idbDelete("options", o.id);
   }
   for (const m of snapAfter.measurements) {
-    if (m.syncState === "dirty" && isRecordId(m.id)) await idbPut("measurements", { ...m, syncState: "clean" });
+    if (m.syncState === "dirty" && isRecordId(m.id) && !failedUpdateIds.has(m.id)) {
+      await idbPut("measurements", { ...m, syncState: "clean" });
+    }
     if (m.syncState === "deleted") await idbDelete("measurements", m.id);
   }
   for (const r of snapAfter.rooms) {
-    if (r.syncState === "dirty") await idbPut("rooms", { ...r, syncState: "clean" });
+    if (r.syncState === "dirty" && !failedUpdateIds.has(r.remoteId || r.id)) {
+      await idbPut("rooms", { ...r, syncState: "clean" });
+    }
+  }
+  for (const s of snapAfter.stores) {
+    if (s.syncState === "dirty" && isRecordId(s.id) && !failedUpdateIds.has(s.id)) {
+      await idbPut("stores", { ...s, syncState: "clean" });
+    }
+    if (s.syncState === "deleted") await idbDelete("stores", s.id);
   }
 
-  return { counts: pushJson.counts || {} };
+  return { counts: pushJson.counts || {}, errors: pushJson.errors || [] };
 }
 
 async function pullChanges() {
@@ -278,17 +314,18 @@ async function pullChanges() {
       options: pullJson.bundle.options.length,
       measurements: pullJson.bundle.measurements.length,
       rooms: pullJson.bundle.rooms.length,
+      stores: Array.isArray((pullJson.bundle as any).stores) ? (pullJson.bundle as any).stores.length : 0,
     },
   };
 }
 
 export async function pushNow(mode: PushMode = "commit") {
   const push = await pushChanges(mode);
-  const summary = { push: push.counts, pull: { items: 0, options: 0, measurements: 0, rooms: 0 } };
+  const summary = { push: push.counts, pull: { items: 0, options: 0, measurements: 0, rooms: 0, stores: 0 } };
   await idbSetMeta("lastSyncAt", Date.now());
   await idbSetMeta("lastSyncSummary", summary);
   notifyDbChanged();
-  return summary;
+  return { ...summary, pushErrors: push.errors };
 }
 
 export async function pullNow() {

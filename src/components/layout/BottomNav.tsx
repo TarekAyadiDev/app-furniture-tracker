@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { DollarSign, LayoutGrid, ListChecks, Settings, ShoppingBag, Star } from "lucide-react";
+import { DollarSign, LayoutGrid, ListChecks, Settings, ShoppingBag, Star, Store } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +12,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { to: "/shopping", label: "Shop", icon: ShoppingBag },
   { to: "/items", label: "Items", icon: ListChecks },
+  { to: "/stores", label: "Stores", icon: Store },
   { to: "/rooms", label: "Rooms", icon: LayoutGrid },
   { to: "/review", label: "Review", icon: Star },
   { to: "/budget", label: "Budget", icon: DollarSign },

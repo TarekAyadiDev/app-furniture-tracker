@@ -61,7 +61,8 @@ export default async function handler(req: any, res: any) {
       const hasOption = types.has("Option");
       const hasNote = types.has("Note");
       const hasMeasurement = types.has("Measurement");
-      if (hasItem && (!hasOption || !hasNote || !hasMeasurement)) {
+      const hasStore = types.has("Store");
+      if (hasItem && (!hasOption || !hasNote || !hasMeasurement || !hasStore)) {
         // Fallback: view may be filtering out Options/Notes/Measurements.
         records = await listAllRecords({ token, baseId, tableId });
       }
@@ -70,6 +71,7 @@ export default async function handler(req: any, res: any) {
     const items: any[] = [];
     const options: any[] = [];
     const measurements: any[] = [];
+    const stores: any[] = [];
     const roomsMap = new Map<string, any>();
 
     for (const rec of records) {
@@ -90,7 +92,12 @@ export default async function handler(req: any, res: any) {
           sort: toNumber(meta?.sort),
           price: toNumber(f["Price"]),
           selectedOptionId: typeof f["Selected Option Id"] === "string" ? f["Selected Option Id"] : null,
-          discountType: typeof meta?.discountType === "string" ? meta.discountType : null,
+          discountType:
+            typeof meta?.discountType === "string"
+              ? meta.discountType
+              : typeof f["Discount Type"] === "string"
+                ? f["Discount Type"]
+                : null,
           discountValue: toNumber(meta?.discountValue),
           qty: toNumber(f["Quantity"]) ? Math.round(toNumber(f["Quantity"]) as number) : 1,
           store: typeof f["Store"] === "string" ? f["Store"] : null,
@@ -160,6 +167,46 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
+      if (rt === "Store") {
+        const name = String(f["Title"] || f["Store"] || "").trim() || "Store";
+        stores.push({
+          id: rec.id,
+          remoteId: rec.id,
+          syncState: "clean",
+          name,
+          discountType: typeof meta?.discountType === "string" ? meta.discountType : null,
+          discountValue: toNumber(meta?.discountValue) ?? toNumber(f["Discount Value"] ?? f["Discount"]),
+          deliveryInfo:
+            typeof meta?.deliveryInfo === "string"
+              ? meta.deliveryInfo
+              : typeof f["Delivery Info"] === "string"
+                ? f["Delivery Info"]
+                : null,
+          extraWarranty:
+            typeof meta?.extraWarranty === "string"
+              ? meta.extraWarranty
+              : typeof f["Extra Warranty"] === "string"
+                ? f["Extra Warranty"]
+                : null,
+          trial:
+            typeof meta?.trial === "string"
+              ? meta.trial
+              : typeof f["Trial"] === "string"
+                ? f["Trial"]
+                : null,
+          apr:
+            typeof meta?.apr === "string"
+              ? meta.apr
+              : typeof f["APR"] === "string"
+                ? f["APR"]
+                : null,
+          notes: userNotes || null,
+          createdAt: toNumber(meta?.createdAt) || Date.now(),
+          updatedAt: toNumber(meta?.updatedAt) || Date.now(),
+        });
+        continue;
+      }
+
       if (rt === "Note") {
         const room = normalizeRoom(f["Room"]);
         roomsMap.set(room, {
@@ -205,6 +252,7 @@ export default async function handler(req: any, res: any) {
           measurements,
           items,
           options,
+          stores,
         },
       }),
     );

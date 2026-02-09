@@ -1,4 +1,4 @@
-import type { DataSource, Item, Measurement, Option, Room } from "@/lib/domain";
+import type { DataSource, Item, Measurement, Option, Room, Store } from "@/lib/domain";
 
 export type TrackedFieldSpec<T> = {
   field: string;
@@ -119,4 +119,17 @@ export const ROOM_TRACKED_FIELDS: TrackedFieldSpec<Room>[] = [
   { field: "notes", get: (r) => r.notes, normalize: normalizeOptionalString },
   { field: "provenance.dataSource", get: (r) => r.provenance?.dataSource, normalize: normalizeDataSource },
   { field: "provenance.sourceRef", get: (r) => r.provenance?.sourceRef, normalize: normalizeOptionalString },
+];
+
+export const STORE_TRACKED_FIELDS: TrackedFieldSpec<Store>[] = [
+  { field: "name", get: (s) => s.name, normalize: normalizeString },
+  { field: "discountType", get: (s) => s.discountType, normalize: normalizeOptionalString },
+  { field: "discountValue", get: (s) => s.discountValue, normalize: normalizeOptionalNumber },
+  { field: "deliveryInfo", get: (s) => s.deliveryInfo, normalize: normalizeOptionalString },
+  { field: "extraWarranty", get: (s) => s.extraWarranty, normalize: normalizeOptionalString },
+  { field: "trial", get: (s) => s.trial, normalize: normalizeOptionalString },
+  { field: "apr", get: (s) => s.apr, normalize: normalizeOptionalString },
+  { field: "notes", get: (s) => s.notes, normalize: normalizeOptionalString },
+  { field: "provenance.dataSource", get: (s) => s.provenance?.dataSource, normalize: normalizeDataSource },
+  { field: "provenance.sourceRef", get: (s) => s.provenance?.sourceRef, normalize: normalizeOptionalString },
 ];

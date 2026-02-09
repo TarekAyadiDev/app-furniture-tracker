@@ -22,7 +22,7 @@ export const ITEM_STATUSES = [
 
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
 
-export type EntityType = "item" | "option" | "measurement" | "room";
+export type EntityType = "item" | "option" | "measurement" | "room" | "store";
 
 export type SyncState = "clean" | "dirty" | "deleted";
 
@@ -160,6 +160,25 @@ export type Room = {
   updatedAt: number;
 };
 
+export type Store = {
+  id: string;
+  remoteId?: string | null;
+  syncState?: SyncState;
+
+  name: string;
+  discountType?: "amount" | "percent" | null;
+  discountValue?: number | null;
+  deliveryInfo?: string | null;
+  extraWarranty?: string | null;
+  trial?: string | null;
+  apr?: string | null;
+  notes?: string | null;
+
+  provenance?: Provenance;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type PlannerAttachmentV1 = {
   version: 1;
   mergedAt: string;
@@ -187,6 +206,7 @@ export type ExportBundleV1 = {
   measurements: Measurement[];
   items: Item[];
   options: Option[];
+  stores?: Store[];
 };
 
 export type ExportBundleV2 = Omit<ExportBundleV1, "version" | "exportMeta"> & {

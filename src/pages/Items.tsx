@@ -10,8 +10,9 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, type Item, type ItemStatus, type Option, type RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, type Item, type ItemStatus, type Option, type RoomId, type Store } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
+import { buildStoreIndex, itemDiscountAmountWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
 import { useToast } from "@/hooks/use-toast";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 import { Badge } from "@/components/ui/badge";
@@ -19,39 +20,14 @@ import { ChevronDown } from "lucide-react";
 
 type RoomFilter = RoomId | "All";
 type StatusFilter = ItemStatus | "All";
+const NO_STORE_FILTER = "__none__";
 
 function includesText(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
-function optionPreDiscountTotalOrNull(opt: Option): number | null {
-  const hasAny =
-    typeof opt.price === "number" ||
-    typeof opt.shipping === "number" ||
-    typeof opt.taxEstimate === "number";
-  if (!hasAny) return null;
-  return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0);
-}
-
-function optionDiscountAmount(opt: Option): number {
-  const value = typeof opt.discountValue === "number" ? opt.discountValue : null;
-  const type = opt.discountType === "percent" || opt.discountType === "amount" ? opt.discountType : null;
-  if (value !== null && value > 0) {
-    if (type === "amount") return value;
-    if (type === "percent") {
-      const base = optionPreDiscountTotalOrNull(opt);
-      if (base === null) return 0;
-      if (value >= 100) return base;
-      return (base * value) / 100;
-    }
-  }
-  return typeof opt.discount === "number" ? opt.discount : 0;
-}
-
-function optionTotalOrNull(opt: Option): number | null {
-  const base = optionPreDiscountTotalOrNull(opt);
-  if (base === null) return null;
-  return base - optionDiscountAmount(opt);
+function optionTotalOrNull(opt: Option, storeByName: Map<string, Store>): number | null {
+  return optionTotalWithStore(opt, storeByName.get(storeKey(opt.store)) || null);
 }
 
 function optionDiscountLabel(opt: Option): string | null {
@@ -61,26 +37,14 @@ function optionDiscountLabel(opt: Option): string | null {
   return `disc -${formatMoneyUSD(value)}`;
 }
 
-function itemDiscountAmount(item: Item): number | null {
-  const value = typeof item.discountValue === "number" ? item.discountValue : null;
-  if (value === null || value <= 0) return null;
-  if (item.discountType === "amount") return value;
-  if (item.discountType === "percent") {
-    const price = typeof item.price === "number" ? item.price : null;
-    if (price === null) return null;
-    if (value >= 100) return null;
-    return (price * value) / 100;
-  }
-  return null;
-}
-
-function effectiveItemTotal(item: Item, selected: Option | null): number | null {
+function effectiveItemTotal(item: Item, selected: Option | null, storeByName: Map<string, Store>): number | null {
   const price = typeof item.price === "number" ? item.price : null;
   if (price !== null) {
-    const discount = itemDiscountAmount(item) || 0;
+    const store = storeByName.get(storeKey(item.store)) || null;
+    const discount = itemDiscountAmountWithStore(item, store) || 0;
     return Math.max(0, price - discount);
   }
-  if (selected) return optionTotalOrNull(selected);
+  if (selected) return optionTotalOrNull(selected, storeByName);
   return null;
 }
 
@@ -95,7 +59,7 @@ function pickSelectedOption(item: Item, list: Option[]): Option | null {
 export default function Items() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, options, reorderRooms, reorderItems, reorderOptions, createItem, updateItem, createOption, updateOption } =
+  const { orderedRooms, roomNameById, items, options, stores, reorderRooms, reorderItems, reorderOptions, createItem, updateItem, createOption, updateOption } =
     useData();
 
   const searchRef = useRef<HTMLInputElement | null>(null);
@@ -114,6 +78,15 @@ export default function Items() {
   const [reorderOptionsForItem, setReorderOptionsForItem] = useState<Record<string, boolean>>({});
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
+  const storeByName = useMemo(() => buildStoreIndex(stores), [stores]);
+  const orderedStores = useMemo(
+    () =>
+      stores
+        .filter((s) => s.syncState !== "deleted")
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [stores],
+  );
 
   function buildCopyName(base: string) {
     const name = base.trim() || "New item";
@@ -336,21 +309,25 @@ export default function Items() {
     for (const it of items) {
       if (it.syncState === "deleted") continue;
       const selected = selectedOptionByItem.get(it.id) || null;
-      totals.set(it.id, effectiveItemTotal(it, selected));
+      totals.set(it.id, effectiveItemTotal(it, selected, storeByName));
     }
     return totals;
-  }, [items, selectedOptionByItem]);
+  }, [items, selectedOptionByItem, storeByName]);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const storeNeedle = storeFilter.trim().toLowerCase();
+    const storeNeedle = storeKey(storeFilter);
     const min = parseNumberOrNull(minPrice);
     const max = parseNumberOrNull(maxPrice);
     return items
       .filter((i) => i.syncState !== "deleted")
       .filter((i) => (roomFilter === "All" ? true : i.room === roomFilter))
       .filter((i) => (statusFilter === "All" ? true : i.status === statusFilter))
-      .filter((i) => (storeNeedle ? includesText(i.store || "", storeNeedle) : true))
+      .filter((i) => {
+        if (!storeNeedle) return true;
+        if (storeFilter === NO_STORE_FILTER) return !storeKey(i.store);
+        return storeKey(i.store) === storeNeedle;
+      })
       .filter((i) => {
         if (min === null && max === null) return true;
         const effective = effectiveTotals.get(i.id) ?? null;
@@ -467,12 +444,19 @@ export default function Items() {
 
             <div>
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Store</label>
-              <Input
+              <select
                 value={storeFilter}
                 onChange={(e) => setStoreFilter(e.target.value)}
-                placeholder="Filter by store"
-                className="mt-1.5 h-11 rounded-xl text-base focus:ring-2 focus:ring-ring"
-              />
+                className="mt-1.5 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">All</option>
+                <option value={NO_STORE_FILTER}>No store</option>
+                {orderedStores.map((s) => (
+                  <option key={s.id} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -645,7 +629,7 @@ export default function Items() {
                                   <DragReorderList
                                     ariaLabel={`Reorder options for ${it.name}`}
                                     items={itemOpts.map((opt) => {
-                                      const total = optionTotalOrNull(opt);
+                                      const total = optionTotalOrNull(opt, storeByName);
                                       const subtitleParts = [
                                         opt.store ? String(opt.store) : "",
                                         total ? formatMoneyUSD(total) : "",
@@ -664,7 +648,7 @@ export default function Items() {
                                 ) : (
                                   <div className="space-y-2">
                                     {itemOpts.map((opt) => {
-                                      const total = optionTotalOrNull(opt);
+                                      const total = optionTotalOrNull(opt, storeByName);
                                       const isSelected = selectedOpt?.id === opt.id || opt.selected;
                                       return (
                                         <div key={opt.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-background/70 p-3">
