@@ -8,11 +8,13 @@ function toNumber(v: any): number | null {
 
 function splitNotes(notesRaw: any) {
   const notes = typeof notesRaw === "string" ? notesRaw : "";
-  const start = notes.lastIndexOf("--- app_meta ---");
-  const end = notes.lastIndexOf("--- /app_meta ---");
+  const openTag = "--- app_meta ---";
+  const closeTag = "--- /app_meta ---";
+  const start = notes.lastIndexOf(openTag);
+  const end = notes.lastIndexOf(closeTag);
   if (start === -1 || end === -1 || end < start) return { userNotes: notes, meta: null as any };
   const jsonText = notes
-    .slice(start + "--- app_meta ---".length, end)
+    .slice(start + openTag.length, end)
     .trim()
     .replace(/^\n+/, "")
     .trim();
@@ -22,7 +24,9 @@ function splitNotes(notesRaw: any) {
   } catch {
     meta = null;
   }
-  const userNotes = notes.slice(0, start).trimEnd();
+  const before = notes.slice(0, start).trimEnd();
+  const after = notes.slice(end + closeTag.length).trimStart();
+  const userNotes = [before, after].filter(Boolean).join("\n\n").trimEnd();
   return { userNotes, meta };
 }
 

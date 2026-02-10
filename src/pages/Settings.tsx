@@ -147,6 +147,11 @@ export default function Settings() {
   const [pulling, setPulling] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [s3Pushing, setS3Pushing] = useState(false);
+  const [s3Pulling, setS3Pulling] = useState(false);
+  const [s3LastKey, setS3LastKey] = useState<string | null>(null);
+  const [s3Snapshots, setS3Snapshots] = useState<Array<{ key: string; name: string | null; exportedAt: string | null; filename: string | null }>>([]);
+  const [s3SnapshotsLoading, setS3SnapshotsLoading] = useState(false);
 
   const [plannerText, setPlannerText] = useState("");
   const [plannerError, setPlannerError] = useState<string | null>(null);
@@ -163,6 +168,7 @@ export default function Settings() {
 
   useEffect(() => {
     void runHealth();
+    void loadS3Snapshots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -264,6 +270,105 @@ export default function Settings() {
     } catch (err: any) {
       toast({ title: "Export failed", description: err?.message || "Unknown error" });
     }
+  }
+
+  async function onS3Push() {
+    setS3Pushing(true);
+    try {
+      const bundle = await exportBundle();
+      const filename = makeExportFilename();
+      const res = await fetch("/api/s3/json", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: bundle, filename }),
+      });
+      const text = await res.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.message || `S3 upload failed (${res.status})`);
+      }
+      setS3LastKey(typeof json.key === "string" ? json.key : null);
+      toast({ title: "Uploaded to S3", description: json.key ? `Saved: ${json.key}` : "Backup saved." });
+      console.info("[S3] JSON upload", json);
+      void loadS3Snapshots();
+    } catch (err: any) {
+      toast({ title: "S3 upload failed", description: err?.message || "Unknown error" });
+      console.error("[S3] JSON upload failed", err);
+    } finally {
+      setS3Pushing(false);
+    }
+  }
+
+  async function onS3Pull(keyOverride?: string) {
+    setS3Pulling(true);
+    try {
+      const key = keyOverride || s3LastKey;
+      const url = key ? `/api/s3/json?key=${encodeURIComponent(key)}` : "/api/s3/json";
+      const res = await fetch(url);
+      const text = await res.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.message || `S3 download failed (${res.status})`);
+      }
+      const payload = JSON.stringify(json.data || {}, null, 2);
+      setImportError(null);
+      setImportText(payload);
+      toast({ title: "Loaded from S3", description: json.key ? `Loaded: ${json.key}` : "Loaded latest backup." });
+      console.info("[S3] JSON download", json);
+    } catch (err: any) {
+      toast({ title: "S3 download failed", description: err?.message || "Unknown error" });
+      console.error("[S3] JSON download failed", err);
+    } finally {
+      setS3Pulling(false);
+    }
+  }
+
+  async function loadS3Snapshots() {
+    setS3SnapshotsLoading(true);
+    try {
+      const res = await fetch("/api/s3/json?list=1");
+      const text = await res.text();
+      let json: any = null;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
+      if (!res.ok || !json?.ok) throw new Error(json?.message || `S3 snapshot list failed (${res.status})`);
+      const list = Array.isArray(json.snapshots) ? json.snapshots : [];
+      setS3Snapshots(
+        list
+          .filter((s: any) => s && typeof s.key === "string")
+          .map((s: any) => ({
+            key: s.key,
+            name: typeof s.name === "string" ? s.name : null,
+            exportedAt: typeof s.exportedAt === "string" ? s.exportedAt : null,
+            filename: typeof s.filename === "string" ? s.filename : null,
+          })),
+      );
+    } catch (err: any) {
+      console.error("[S3] Snapshot list failed", err);
+      setS3Snapshots([]);
+    } finally {
+      setS3SnapshotsLoading(false);
+    }
+  }
+
+  function formatSnapshotLabel(snap: { name: string | null; exportedAt: string | null; filename: string | null }) {
+    const name = snap.name || "Snapshot";
+    const date = snap.exportedAt ? new Date(snap.exportedAt).toLocaleString() : null;
+    const file = snap.filename ? ` · ${snap.filename}` : "";
+    return `${name}${date ? ` · ${date}` : ""}${file}`;
   }
 
   async function onMergePlannerAndExport() {
@@ -444,9 +549,6 @@ export default function Settings() {
           <Button variant="secondary" onClick={() => fileRef.current?.click()}>
             Choose JSON file
           </Button>
-          <Button variant="secondary" onClick={() => void loadBundledImport("/examples/town_hollywood_setup.json")}>
-            Load legacy Town Hollywood JSON
-          </Button>
           {shoppingDataSeeds.length ? (
             <Button
               variant="secondary"
@@ -460,13 +562,38 @@ export default function Settings() {
               Load Shopping Data JSON
             </Button>
           ) : null}
-          <Button variant="secondary" onClick={() => void onLoadExample("merge")}>
-            Load Town Hollywood (merge)
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">Recent S3 snapshots (latest two backups).</div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => void loadS3Snapshots()} disabled={s3SnapshotsLoading}>
+            {s3SnapshotsLoading ? "Refreshing..." : "Refresh snapshots"}
           </Button>
-          <Button variant="secondary" onClick={() => void onLoadExample("replace")}>
-            Load Town Hollywood (replace)
+          {s3Snapshots.map((snap, idx) => (
+            <Button key={`${snap.key}-${idx}`} variant="secondary" onClick={() => void onS3Pull(snap.key)} disabled={s3Pulling}>
+              {formatSnapshotLabel(snap)}
+            </Button>
+          ))}
+          {!s3SnapshotsLoading && s3Snapshots.length === 0 ? (
+            <span className="text-xs text-muted-foreground">No snapshots yet.</span>
+          ) : null}
+        </div>
+        <div className="mt-2 text-xs text-muted-foreground">
+          Optional backup: push/pull JSON to S3 (same bucket as image uploads). Saves to `uploads/exports/` and updates
+          `uploads/exports/latest.json`.
+        </div>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={() => void onS3Push()} disabled={s3Pushing}>
+            {s3Pushing ? "Uploading..." : "Backup JSON to S3"}
+          </Button>
+          <Button variant="secondary" onClick={() => void onS3Pull()} disabled={s3Pulling}>
+            {s3Pulling ? "Loading..." : "Load JSON from S3"}
           </Button>
         </div>
+        {s3LastKey ? (
+          <div className="mt-2 text-xs text-muted-foreground">
+            Last S3 key: <span className="font-semibold">{s3LastKey}</span>
+          </div>
+        ) : null}
         <div className="mt-3 space-y-2">
           <div className="text-xs text-muted-foreground">
             Paste JSON here, drag a JSON file into the box, or use “Choose JSON file”.

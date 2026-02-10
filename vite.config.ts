@@ -4,6 +4,7 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 import healthHandler from "./api/health";
 import s3SignHandler from "./api/s3/sign";
+import s3JsonHandler from "./api/s3/json";
 import pullHandler from "./api/sync/pull";
 import pushHandler from "./api/sync/push";
 
@@ -28,6 +29,14 @@ function localApiPlugin(): Plugin {
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ ok: false, message: err?.message || "S3 sign failed" }));
+          });
+          return;
+        }
+        if (url.startsWith("/s3/json")) {
+          void Promise.resolve(s3JsonHandler(req, res)).catch((err: any) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, message: err?.message || "S3 JSON failed" }));
           });
           return;
         }

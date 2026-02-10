@@ -13,7 +13,8 @@ function buildNotes(userNotesRaw: any, meta: any) {
   const metaObj = meta && typeof meta === "object" ? meta : null;
   if (!metaObj || Object.keys(metaObj).length === 0) return userNotes;
   const json = JSON.stringify(metaObj);
-  return `${userNotes ? `${userNotes}\n\n` : ""}--- app_meta ---\n${json}\n--- /app_meta ---`;
+  // Keep app_meta at the top so Airtable truncation preserves metadata.
+  return `--- app_meta ---\n${json}\n--- /app_meta ---${userNotes ? `\n\n${userNotes}` : ""}`;
 }
 
 function parseBody(req: any): Promise<any> {
