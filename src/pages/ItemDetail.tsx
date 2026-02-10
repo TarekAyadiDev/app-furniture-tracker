@@ -19,7 +19,7 @@ import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provena
 import { useToast } from "@/hooks/use-toast";
 import { shareData } from "@/lib/share";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
-import { buildStoreIndex, optionPreDiscountTotalWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
+import { buildStoreIndex, computeStoreAllocation, optionTotalWithoutStore, storeKey } from "@/lib/storePricing";
 
 function optionPreDiscountTotalOrNull(o: Option): number | null {
   const hasAny =
@@ -188,12 +188,7 @@ export default function ItemDetail() {
     [options, id],
   );
 
-  const optionTotalOrNull = useMemo(
-    () =>
-      (opt: Option) =>
-        optionTotalWithStore(opt, storeByName.get(storeKey(opt.store || item?.store)) || null),
-    [item?.store, storeByName],
-  );
+  const optionTotalOrNull = useMemo(() => (opt: Option) => optionTotalWithoutStore(opt), []);
 
   const optionFinalTotal = useMemo(() => (opt: Option) => optionTotalOrNull(opt) ?? 0, [optionTotalOrNull]);
 
@@ -268,6 +263,34 @@ export default function ItemDetail() {
     if (selectedOptionId) return selectedOption ? [selectedOption] : [];
     return [];
   }, [itemOptions, selectedOption, selectedOptionId]);
+
+  const selectedOptionsByItem = useMemo(() => {
+    const byItem = new Map<string, Option[]>();
+    for (const o of options) {
+      if (o.syncState === "deleted") continue;
+      if (!byItem.has(o.itemId)) byItem.set(o.itemId, []);
+      byItem.get(o.itemId)!.push(o);
+    }
+    for (const it of items) {
+      if (it.syncState === "deleted") continue;
+      const list = byItem.get(it.id) || [];
+      let selectedList = list.filter((o) => o.selected);
+      if (!selectedList.length && it.selectedOptionId) {
+        const selected = list.find((o) => o.id === it.selectedOptionId) || null;
+        if (selected) selectedList = [selected];
+      }
+      byItem.set(it.id, selectedList);
+    }
+    return byItem;
+  }, [items, options]);
+
+  const storeAllocation = useMemo(() => computeStoreAllocation(items, selectedOptionsByItem, storeByName), [items, selectedOptionsByItem, storeByName]);
+  const itemTotal = item ? storeAllocation.itemTotals.get(item.id) ?? null : null;
+  const itemBaseTotal = item ? storeAllocation.itemBaseTotals.get(item.id) ?? null : null;
+  const itemStoreKey = item ? storeAllocation.itemStoreKey.get(item.id) || null : null;
+  const storeSummary = itemStoreKey ? storeAllocation.storeTotals.get(itemStoreKey) || null : null;
+  const storeAppliedHere = Boolean(storeSummary && item && storeSummary.appliedItemId === item.id);
+  const itemNameById = useMemo(() => new Map(items.filter((i) => i.syncState !== "deleted").map((i) => [i.id, i.name])), [items]);
 
   const optionOnlyOption = useMemo(() => {
     if (!optionOnlyId) return null;
@@ -424,28 +447,7 @@ export default function ItemDetail() {
   const priceValue = parseNumberOrNull(price);
   const discountValueNum = parseNumberOrNull(discountValue);
   const itemDiscountAmount = computeDiscountAmount(priceValue, discountType, discountValueNum) || 0;
-  const storeDiscountAmount =
-    storeForItem && (storeForItem.discountType === "amount" || storeForItem.discountType === "percent")
-      ? computeDiscountAmount(priceValue, storeForItem.discountType, storeForItem.discountValue ?? null) || 0
-      : 0;
-  const selectedOptionsTotal = useMemo(() => {
-    if (!selectedOptions.length) return null;
-    let total = 0;
-    let hasAny = false;
-    for (const opt of selectedOptions) {
-      const t = optionTotalOrNull(opt);
-      if (t === null) continue;
-      total += t;
-      hasAny = true;
-    }
-    return hasAny ? total : null;
-  }, [optionTotalOrNull, selectedOptions]);
-  const effectivePriceValue =
-    selectedOptionsTotal !== null
-      ? selectedOptionsTotal
-      : priceValue === null
-        ? null
-        : Math.max(0, priceValue - itemDiscountAmount - storeDiscountAmount);
+  const effectivePriceValue = itemTotal !== null ? itemTotal : priceValue === null ? null : Math.max(0, priceValue - itemDiscountAmount);
   const inheritedItemPhotos = selectedOptionId ? optionAttachments[selectedOptionId] || [] : [];
   const inheritedItemPhotoLabel = selectedOption ? `Using photos from "${selectedOption.title}".` : undefined;
 
@@ -739,8 +741,7 @@ export default function ItemDetail() {
     ]);
     const chosen = itemOptions.find((o) => o.id === optionId);
     if (chosen) {
-      const store = storeByName.get(storeKey(chosen.store || item.store)) || null;
-      const preDiscount = optionPreDiscountTotalWithStore(chosen, store);
+      const preDiscount = optionPreDiscountTotalOrNull(chosen);
       const optDiscountType =
         chosen.discountType === "percent" || chosen.discountType === "amount"
           ? chosen.discountType
@@ -1087,20 +1088,22 @@ export default function ItemDetail() {
                 className="h-12 text-base"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="item_qty">Qty</Label>
-              <Input
-                id="item_qty"
-                inputMode="numeric"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                onBlur={() => {
-                  const n = parseNumberOrNull(qty);
-                  void commit({ qty: n && n > 0 ? Math.round(n) : 1 });
-                }}
-                className="h-12 text-base"
-              />
-            </div>
+            {!itemOptions.length ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="item_qty">Qty</Label>
+                <Input
+                  id="item_qty"
+                  inputMode="numeric"
+                  value={qty}
+                  onChange={(e) => setQty(e.target.value)}
+                  onBlur={() => {
+                    const n = parseNumberOrNull(qty);
+                    void commit({ qty: n && n > 0 ? Math.round(n) : 1 });
+                  }}
+                  className="h-12 text-base"
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -1147,16 +1150,13 @@ export default function ItemDetail() {
                 placeholder={discountType === "percent" ? "%" : "$"}
                 className="h-12 text-base"
               />
-              {discountValue ? (
+              {discountValue || (storeSummary && storeSummary.storeDiscount) ? (
                 <div className="text-xs text-muted-foreground">
                   {(() => {
                     const priceVal = parseNumberOrNull(price);
                     const v = parseNumberOrNull(discountValue);
                     const itemAmt = computeDiscountAmount(priceVal, discountType, v) || 0;
-                    const storeAmt =
-                      storeForItem && (storeForItem.discountType === "amount" || storeForItem.discountType === "percent")
-                        ? computeDiscountAmount(priceVal, storeForItem.discountType, storeForItem.discountValue ?? null) || 0
-                        : 0;
+                    const storeAmt = storeAppliedHere ? storeSummary?.storeDiscount || 0 : 0;
                     const total = itemAmt + storeAmt;
                     return total ? `Savings: ${formatMoneyUSD(total)}${storeAmt ? " (incl. store)" : ""}` : "Savings: —";
                   })()}
@@ -1167,11 +1167,33 @@ export default function ItemDetail() {
               <Label>Effective total</Label>
               <div className="flex h-12 items-center rounded-md border bg-background px-3 text-sm">
                 {(() => {
-                  if (priceValue === null) return "—";
-                  return formatMoneyUSD(effectivePriceValue ?? priceValue);
+                  if (effectivePriceValue === null) return "—";
+                  return formatMoneyUSD(effectivePriceValue);
                 })()}
               </div>
               <div className="text-xs text-muted-foreground">Used for budget totals.</div>
+              {typeof itemBaseTotal === "number" ? (
+                <div className="text-xs text-muted-foreground">
+                  Item subtotal{(item?.qty || 1) > 1 ? ` (x${item?.qty})` : ""} {formatMoneyUSD(itemBaseTotal)}
+                </div>
+              ) : null}
+              {storeSummary ? (
+                <div className="text-xs text-muted-foreground">
+                  Store total {formatMoneyUSD(storeSummary.total)}
+                  {storeSummary.storeDiscount || storeSummary.storeShipping
+                    ? storeAppliedHere
+                      ? (() => {
+                          const parts: string[] = [];
+                          if (storeSummary.storeDiscount) parts.push(`discount -${formatMoneyUSD(storeSummary.storeDiscount)}`);
+                          if (storeSummary.storeShipping) parts.push(`shipping ${formatMoneyUSD(storeSummary.storeShipping)}`);
+                          return parts.length ? ` · ${parts.join(" · ")}` : "";
+                        })()
+                      : storeSummary.appliedItemId && itemNameById.get(storeSummary.appliedItemId)
+                        ? ` · store adj on ${itemNameById.get(storeSummary.appliedItemId)}`
+                        : " · store adj on another item"
+                    : ""}
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1214,7 +1236,7 @@ export default function ItemDetail() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="font-heading text-base font-semibold text-foreground">Store perks</h3>
-                  <p className="text-xs text-muted-foreground">Applied alongside item discounts.</p>
+                  <p className="text-xs text-muted-foreground">Applied once to the most expensive item in this store.</p>
                 </div>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
@@ -1612,6 +1634,7 @@ export default function ItemDetail() {
                               {o.shipping ? <span>delivery {formatMoneyUSD(o.shipping)}</span> : null}
                               {o.taxEstimate ? <span>tax {formatMoneyUSD(o.taxEstimate)}</span> : null}
                               {optionDiscountLabel(o) ? <span>{optionDiscountLabel(o)}</span> : null}
+                              {isSelected && (item?.qty || 1) !== 1 ? <span>qty {item?.qty}</span> : null}
                             </div>
                           </button>
 
@@ -1791,6 +1814,22 @@ export default function ItemDetail() {
                                 />
                               </div>
                             </div>
+
+                            {isSelected || optionOnly ? (
+                              <div className="space-y-1.5">
+                                <Label>Qty (selected item)</Label>
+                                <Input
+                                  inputMode="numeric"
+                                  value={qty}
+                                  onChange={(e) => setQty(e.target.value)}
+                                  onBlur={() => {
+                                    const n = parseNumberOrNull(qty);
+                                    void commit({ qty: n && n > 0 ? Math.round(n) : 1 });
+                                  }}
+                                  className="h-11 text-base"
+                                />
+                              </div>
+                            ) : null}
 
                             <div className="grid grid-cols-2 gap-3">
                               <div className="space-y-1.5">

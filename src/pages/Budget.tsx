@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { Card } from "@/components/ui/card";
-import type { Item, ItemStatus, Option, RoomId, Store } from "@/lib/domain";
+import type { Item, ItemStatus, Option, RoomId } from "@/lib/domain";
 import { formatMoneyUSD } from "@/lib/format";
 import { useData } from "@/data/DataContext";
-import { buildStoreIndex, itemDiscountAmountWithStore, optionDiscountAmountWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
+import { buildStoreIndex, computeStoreAllocation } from "@/lib/storePricing";
 
 type Totals = { planned: number; selected: number; spent: number; discount: number; missingPrice: number; count: number };
 
@@ -14,25 +14,19 @@ function bucketForStatus(status: ItemStatus): keyof Totals | null {
   return null;
 }
 
-type SelectedSummary = { total: number | null; discount: number };
-
-function addLine(t: Totals, item: Item, selectedTotals: Map<string, SelectedSummary>, storeByName: Map<string, Store>) {
+function addLine(t: Totals, item: Item, allocation: ReturnType<typeof computeStoreAllocation>) {
   t.count += 1;
-  const itemPrice = typeof item.price === "number" ? item.price : null;
-  const summary = selectedTotals.get(item.id) || { total: null, discount: 0 };
-  const useSelected = summary.total !== null;
-  const price = useSelected ? summary.total : itemPrice;
+  const price = allocation.itemTotals.get(item.id) ?? null;
   if (price === null) {
     t.missingPrice += 1;
     return;
   }
-  const store = storeByName.get(storeKey(item.store)) || null;
-  const discount = useSelected ? summary.discount : itemPrice !== null ? itemDiscountAmountWithStore(item, store) || 0 : 0;
-  if (discount) t.discount += discount * (item.qty || 1);
-  const effective = useSelected ? price : Math.max(0, price - discount);
+  const discount = allocation.itemDiscountTotals.get(item.id) || 0;
+  if (discount) t.discount += discount;
+  const effective = Math.max(0, price);
   const b = bucketForStatus(item.status);
   if (!b) return;
-  t[b] += effective * (item.qty || 1);
+  t[b] += effective;
 }
 
 export default function Budget() {
@@ -43,14 +37,13 @@ export default function Budget() {
 
   const activeItems = useMemo(() => items.filter((i) => i.syncState !== "deleted"), [items]);
 
-  const selectedOptionTotals = useMemo(() => {
+  const selectedOptionsByItem = useMemo(() => {
     const byItem = new Map<string, Option[]>();
     for (const o of options) {
       if (o.syncState === "deleted") continue;
       if (!byItem.has(o.itemId)) byItem.set(o.itemId, []);
       byItem.get(o.itemId)!.push(o);
     }
-    const totals = new Map<string, SelectedSummary>();
     for (const it of activeItems) {
       const list = byItem.get(it.id) || [];
       let selectedList = list.filter((o) => o.selected);
@@ -58,51 +51,42 @@ export default function Budget() {
         const selected = list.find((o) => o.id === it.selectedOptionId) || null;
         if (selected) selectedList = [selected];
       }
-      if (!selectedList.length) {
-        totals.set(it.id, { total: null, discount: 0 });
-        continue;
-      }
-      let total = 0;
-      let hasAny = false;
-      let discount = 0;
-      for (const opt of selectedList) {
-        const store = storeByName.get(storeKey(opt.store || it.store)) || null;
-        const optTotal = optionTotalWithStore(opt, store);
-        if (optTotal === null) continue;
-        total += optTotal;
-        discount += optionDiscountAmountWithStore(opt, store);
-        hasAny = true;
-      }
-      totals.set(it.id, { total: hasAny ? total : null, discount });
+      if (selectedList.length) byItem.set(it.id, selectedList);
+      else byItem.set(it.id, []);
     }
-    return totals;
-  }, [activeItems, options, storeByName]);
+    return byItem;
+  }, [activeItems, options]);
+
+  const storeAllocation = useMemo(
+    () => computeStoreAllocation(activeItems, selectedOptionsByItem, storeByName),
+    [activeItems, selectedOptionsByItem, storeByName],
+  );
 
   const totals = useMemo(() => {
     const t: Totals = { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 };
-    for (const it of activeItems) addLine(t, it, selectedOptionTotals, storeByName);
+    for (const it of activeItems) addLine(t, it, storeAllocation);
     return t;
-  }, [activeItems, selectedOptionTotals, storeByName]);
+  }, [activeItems, storeAllocation]);
 
   const byRoom = useMemo(() => {
     const out = new Map<RoomId, Totals>();
     for (const r of orderedRoomIds) out.set(r, { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 });
     for (const it of activeItems) {
       const t = out.get(it.room);
-      if (t) addLine(t, it, selectedOptionTotals, storeByName);
+      if (t) addLine(t, it, storeAllocation);
     }
     return out;
-  }, [activeItems, orderedRoomIds, selectedOptionTotals, storeByName]);
+  }, [activeItems, orderedRoomIds, storeAllocation]);
 
   const byCategory = useMemo(() => {
     const out = new Map<string, Totals>();
     for (const it of activeItems) {
       const key = (it.category || "Other").trim() || "Other";
       if (!out.has(key)) out.set(key, { planned: 0, selected: 0, spent: 0, discount: 0, missingPrice: 0, count: 0 });
-      addLine(out.get(key)!, it, selectedOptionTotals, storeByName);
+      addLine(out.get(key)!, it, storeAllocation);
     }
     return [...out.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [activeItems, selectedOptionTotals, storeByName]);
+  }, [activeItems, storeAllocation]);
 
   return (
     <div className="space-y-5">

@@ -84,6 +84,12 @@ export function optionBaseDiscountAmount(opt: Option, baseOverride?: number | nu
   return typeof opt.discount === "number" ? opt.discount : 0;
 }
 
+export function optionTotalWithoutStore(opt: Option): number | null {
+  const base = optionPreDiscountTotalOrNull(opt);
+  if (base === null) return null;
+  return base - optionBaseDiscountAmount(opt, base);
+}
+
 export function optionDiscountAmountWithStore(opt: Option, store: Store | null): number {
   const base = optionPreDiscountTotalWithStore(opt, store);
   if (base === null) return 0;
@@ -96,4 +102,110 @@ export function optionTotalWithStore(opt: Option, store: Store | null): number |
   const base = optionPreDiscountTotalWithStore(opt, store);
   if (base === null) return null;
   return base - optionDiscountAmountWithStore(opt, store);
+}
+
+export type StoreTotals = {
+  total: number;
+  storeDiscount: number;
+  storeShipping: number;
+  appliedItemId: string | null;
+};
+
+export type StoreAllocation = {
+  itemTotals: Map<string, number | null>;
+  itemBaseTotals: Map<string, number | null>;
+  itemDiscountTotals: Map<string, number>;
+  itemStoreKey: Map<string, string | null>;
+  storeTotals: Map<string, StoreTotals>;
+};
+
+export function computeStoreAllocation(
+  items: Item[],
+  selectedOptionsByItem: Map<string, Option[]>,
+  storeByName: Map<string, Store>,
+): StoreAllocation {
+  const itemTotals = new Map<string, number | null>();
+  const itemBaseTotals = new Map<string, number | null>();
+  const itemDiscountTotals = new Map<string, number>();
+  const itemStoreKey = new Map<string, string | null>();
+  const storeTotals = new Map<string, StoreTotals>();
+  const storeLines = new Map<string, { itemId: string; baseTotal: number }[]>();
+
+  for (const item of items) {
+    if (item.syncState === "deleted") continue;
+    const selected = selectedOptionsByItem.get(item.id) || [];
+    let baseTotal: number | null = null;
+    let discountTotal = 0;
+    if (selected.length) {
+      let base = 0;
+      let discount = 0;
+      let hasAny = false;
+      for (const opt of selected) {
+        const preDiscount = optionPreDiscountTotalOrNull(opt);
+        if (preDiscount === null) continue;
+        const optDiscountRaw = optionBaseDiscountAmount(opt, preDiscount);
+        const optDiscount = Math.min(optDiscountRaw, preDiscount);
+        base += Math.max(0, preDiscount - optDiscount);
+        discount += optDiscount;
+        hasAny = true;
+      }
+      if (hasAny) {
+        const qty = item.qty || 1;
+        baseTotal = base * qty;
+        discountTotal = discount * qty;
+      }
+    } else {
+      const price = typeof item.price === "number" ? item.price : null;
+      if (price !== null) {
+        const itemDiscountRaw = itemBaseDiscountAmount(item) || 0;
+        const itemDiscount = Math.min(itemDiscountRaw, price);
+        const qty = item.qty || 1;
+        baseTotal = Math.max(0, price - itemDiscount) * qty;
+        discountTotal = itemDiscount * qty;
+      }
+    }
+
+    itemBaseTotals.set(item.id, baseTotal);
+    itemDiscountTotals.set(item.id, discountTotal);
+    let key = storeKey(item.store);
+    if (!key && selected.length) {
+      const fallback = storeKey(selected[0]?.store);
+      if (fallback) key = fallback;
+    }
+    itemStoreKey.set(item.id, key || null);
+
+    if (baseTotal !== null && key) {
+      if (!storeLines.has(key)) storeLines.set(key, []);
+      storeLines.get(key)!.push({ itemId: item.id, baseTotal });
+    } else {
+      itemTotals.set(item.id, baseTotal);
+    }
+  }
+
+  for (const [key, lines] of storeLines.entries()) {
+    const store = storeByName.get(key) || null;
+    const storeShipping = typeof store?.shippingCost === "number" ? store.shippingCost : 0;
+    let maxLine = lines[0];
+    for (const line of lines) {
+      if (line.baseTotal > maxLine.baseTotal) maxLine = line;
+    }
+    const rawStoreDiscount = store ? computeDiscountAmount(maxLine.baseTotal, store.discountType, store.discountValue) || 0 : 0;
+    const storeDiscount = Math.min(rawStoreDiscount, maxLine.baseTotal);
+
+    let storeTotal = 0;
+    for (const line of lines) {
+      const hasStoreAdjustments = line.itemId === maxLine.itemId && (storeShipping !== 0 || storeDiscount !== 0);
+      const lineTotal = hasStoreAdjustments ? Math.max(0, line.baseTotal + storeShipping - storeDiscount) : line.baseTotal;
+      const prev = itemTotals.get(line.itemId);
+      itemTotals.set(line.itemId, typeof prev === "number" ? prev + lineTotal : lineTotal);
+      if (hasStoreAdjustments && storeDiscount) {
+        itemDiscountTotals.set(line.itemId, (itemDiscountTotals.get(line.itemId) || 0) + storeDiscount);
+      }
+      storeTotal += lineTotal;
+    }
+
+    storeTotals.set(key, { total: storeTotal, storeDiscount, storeShipping, appliedItemId: maxLine.itemId });
+  }
+
+  return { itemTotals, itemBaseTotals, itemDiscountTotals, itemStoreKey, storeTotals };
 }

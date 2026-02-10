@@ -10,13 +10,13 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, type Item, type ItemStatus, type Option, type RoomId, type Store } from "@/lib/domain";
+import { ITEM_STATUSES, type Item, type ItemStatus, type Option, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import {
   buildStoreIndex,
-  itemDiscountAmountWithStore,
-  optionPreDiscountTotalWithStore,
-  optionTotalWithStore,
+  computeStoreAllocation,
+  optionPreDiscountTotalOrNull,
+  optionTotalWithoutStore,
   storeKey,
 } from "@/lib/storePricing";
 import { useToast } from "@/hooks/use-toast";
@@ -27,18 +27,43 @@ import { ChevronDown } from "lucide-react";
 type RoomFilter = RoomId | "All";
 type StatusFilter = ItemStatus | "All";
 const NO_STORE_FILTER = "__none__";
+const ITEMS_UI_KEY = "ft_items_ui_state_v1";
+
+type ItemsUiState = {
+  openRooms: string[];
+  openItemOptions: Record<string, boolean>;
+};
+
+function loadItemsUiState(): ItemsUiState {
+  try {
+    if (typeof window === "undefined") return { openRooms: [], openItemOptions: {} };
+    const raw = localStorage.getItem(ITEMS_UI_KEY);
+    if (!raw) return { openRooms: [], openItemOptions: {} };
+    const parsed = JSON.parse(raw);
+    return {
+      openRooms: Array.isArray(parsed?.openRooms) ? parsed.openRooms.map(String) : [],
+      openItemOptions: typeof parsed?.openItemOptions === "object" && parsed?.openItemOptions ? parsed.openItemOptions : {},
+    };
+  } catch {
+    return { openRooms: [], openItemOptions: {} };
+  }
+}
+
+function saveItemsUiState(state: ItemsUiState) {
+  try {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(ITEMS_UI_KEY, JSON.stringify(state));
+  } catch {
+    // ignore storage failures
+  }
+}
 
 function includesText(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
-function resolveStoreForOption(item: Item, opt: Option, storeByName: Map<string, Store>): Store | null {
-  const key = storeKey(opt.store || item.store);
-  return key ? storeByName.get(key) || null : null;
-}
-
-function optionTotalOrNull(item: Item, opt: Option, storeByName: Map<string, Store>): number | null {
-  return optionTotalWithStore(opt, resolveStoreForOption(item, opt, storeByName));
+function optionTotalOrNull(opt: Option): number | null {
+  return optionTotalWithoutStore(opt);
 }
 
 function optionDiscountLabel(opt: Option): string | null {
@@ -46,27 +71,6 @@ function optionDiscountLabel(opt: Option): string | null {
   if (value === null || value <= 0) return null;
   if (opt.discountType === "percent") return `disc -${value}%`;
   return `disc -${formatMoneyUSD(value)}`;
-}
-
-function effectiveItemTotal(item: Item, selected: Option[] | null, storeByName: Map<string, Store>): number | null {
-  if (selected && selected.length) {
-    let total = 0;
-    let hasAny = false;
-    for (const opt of selected) {
-      const t = optionTotalOrNull(item, opt, storeByName);
-      if (t === null) continue;
-      total += t;
-      hasAny = true;
-    }
-    return hasAny ? total : null;
-  }
-  const price = typeof item.price === "number" ? item.price : null;
-  if (price !== null) {
-    const store = storeByName.get(storeKey(item.store)) || null;
-    const discount = itemDiscountAmountWithStore(item, store) || 0;
-    return Math.max(0, price - discount);
-  }
-  return null;
 }
 
 function pickSelectedOptions(item: Item, list: Option[]): Option[] {
@@ -97,11 +101,14 @@ export default function Items() {
   const [reorderRoomsMode, setReorderRoomsMode] = useState(false);
   const [reorderRoomId, setReorderRoomId] = useState<RoomId | null>(null);
   const [duplicateItemId, setDuplicateItemId] = useState<string | null>(null);
-  const [openItemOptions, setOpenItemOptions] = useState<Record<string, boolean>>({});
+  const initialUi = useMemo(() => loadItemsUiState(), []);
+  const [openRooms, setOpenRooms] = useState<string[]>(() => initialUi.openRooms);
+  const [openItemOptions, setOpenItemOptions] = useState<Record<string, boolean>>(() => initialUi.openItemOptions);
   const [reorderOptionsForItem, setReorderOptionsForItem] = useState<Record<string, boolean>>({});
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
   const storeByName = useMemo(() => buildStoreIndex(orderedStores), [orderedStores]);
+  const itemNameById = useMemo(() => new Map(items.filter((i) => i.syncState !== "deleted").map((i) => [i.id, i.name])), [items]);
 
   function buildCopyName(base: string) {
     const name = base.trim() || "New item";
@@ -246,8 +253,7 @@ export default function Items() {
         updateOption(option.id, { selected: true }),
         ...others.map((o) => updateOption(o.id, { selected: false })),
       ]);
-      const store = resolveStoreForOption(item, option, storeByName);
-      const preDiscountTotal = optionPreDiscountTotalWithStore(option, store);
+      const preDiscountTotal = optionPreDiscountTotalOrNull(option);
       const optDiscountType =
         option.discountType === "percent" || option.discountType === "amount"
           ? option.discountType
@@ -320,15 +326,12 @@ export default function Items() {
     return selected;
   }, [items, optionsByItem]);
 
-  const effectiveTotals = useMemo(() => {
-    const totals = new Map<string, number | null>();
-    for (const it of items) {
-      if (it.syncState === "deleted") continue;
-      const selected = selectedOptionByItem.get(it.id) || [];
-      totals.set(it.id, effectiveItemTotal(it, selected, storeByName));
-    }
-    return totals;
-  }, [items, selectedOptionByItem, storeByName]);
+  const storeAllocation = useMemo(
+    () => computeStoreAllocation(items, selectedOptionByItem, storeByName),
+    [items, selectedOptionByItem, storeByName],
+  );
+
+  const effectiveTotals = storeAllocation.itemTotals;
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -381,6 +384,10 @@ export default function Items() {
     }
     return map;
   }, [filtered, orderedRooms]);
+
+  useEffect(() => {
+    saveItemsUiState({ openRooms, openItemOptions });
+  }, [openRooms, openItemOptions]);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -505,7 +512,7 @@ export default function Items() {
         </Collapsible>
       </Card>
 
-      <Accordion type="multiple" className="space-y-3">
+      <Accordion type="multiple" className="space-y-3" value={openRooms} onValueChange={(v) => setOpenRooms(v as string[])}>
         {orderedRoomIds.map((r) => {
           const group = byRoom.get(r) || [];
           if (!group.length) return null;
@@ -540,6 +547,11 @@ export default function Items() {
                         const selectedOpts = selectedOptionByItem.get(it.id) || pickSelectedOptions(it, itemOpts);
                         const selectedOpt = selectedOpts.length === 1 ? selectedOpts[0] : null;
                         const displayPrice = effectiveTotals.get(it.id) ?? null;
+                        const storeKeyForItem = storeAllocation.itemStoreKey.get(it.id) || null;
+                        const storeSummary = storeKeyForItem ? storeAllocation.storeTotals.get(storeKeyForItem) || null : null;
+                        const hasStoreAdjustments = Boolean(storeSummary && (storeSummary.storeDiscount || storeSummary.storeShipping));
+                        const appliedItemId = storeSummary?.appliedItemId || null;
+                        const appliedName = appliedItemId ? itemNameById.get(appliedItemId) || null : null;
                         const openOptions = Boolean(openItemOptions[it.id]);
                         const openOptReorder = Boolean(reorderOptionsForItem[it.id]);
                         const modifiedFields = Array.isArray(it.provenance?.modifiedFields) ? it.provenance.modifiedFields : [];
@@ -582,14 +594,31 @@ export default function Items() {
                                     <span className="truncate">{it.category || "Other"}</span>
                                     {it.store ? <span className="truncate">{it.store}</span> : null}
                                     {displayPrice !== null ? <span>{formatMoneyUSD(displayPrice)}</span> : <span className="italic">no price</span>}
-                                    {it.qty !== 1 ? <span>qty {it.qty}</span> : null}
+                                    {it.qty !== 1 && !itemOpts.length ? <span>qty {it.qty}</span> : null}
                                     {it.priority ? <span>P{it.priority}</span> : null}
                                     {selectedOpt ? (
-                                      <span className="font-medium text-foreground">Selected: {selectedOpt.title}</span>
+                                      <span className="font-medium text-foreground">
+                                        Selected: {selectedOpt.title}
+                                        {it.qty !== 1 ? ` x${it.qty}` : ""}
+                                      </span>
                                     ) : selectedOpts.length > 1 ? (
                                       <span className="font-medium text-foreground">Selected: {selectedOpts.length} options</span>
                                     ) : itemOpts.length ? (
                                       <span>{itemOpts.length} option(s)</span>
+                                    ) : null}
+                                    {storeSummary ? (
+                                      <span className="text-muted-foreground">
+                                        Store total {formatMoneyUSD(storeSummary.total)}
+                                        {storeSummary.storeDiscount ? ` · discount -${formatMoneyUSD(storeSummary.storeDiscount)}` : ""}
+                                        {storeSummary.storeShipping ? ` · shipping ${formatMoneyUSD(storeSummary.storeShipping)}` : ""}
+                                        {hasStoreAdjustments
+                                          ? appliedItemId === it.id
+                                            ? " · store discount/shipping applied here"
+                                            : appliedName
+                                              ? ` · store discount/shipping on ${appliedName}`
+                                              : " · store discount/shipping on another item"
+                                          : ""}
+                                      </span>
                                     ) : null}
                                   </div>
                                 </div>
@@ -648,7 +677,7 @@ export default function Items() {
                                   <DragReorderList
                                     ariaLabel={`Reorder options for ${it.name}`}
                                     items={itemOpts.map((opt) => {
-                                      const total = optionTotalOrNull(it, opt, storeByName);
+                                      const total = optionTotalOrNull(opt);
                                       const subtitleParts = [
                                         opt.store ? String(opt.store) : "",
                                         total ? formatMoneyUSD(total) : "",
@@ -667,7 +696,7 @@ export default function Items() {
                                 ) : (
                                   <div className="space-y-2">
                                     {itemOpts.map((opt) => {
-                                      const total = optionTotalOrNull(it, opt, storeByName);
+                                      const total = optionTotalOrNull(opt);
                                       const isSelected = selectedOpt?.id === opt.id || opt.selected;
                                       return (
                                         <div key={opt.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-background/70 p-3">
@@ -682,6 +711,7 @@ export default function Items() {
                                               {typeof opt.priority === "number" ? <span>P{opt.priority}</span> : null}
                                               {total ? <span>{formatMoneyUSD(total)}</span> : <span className="italic">no total</span>}
                                               {optionDiscountLabel(opt) ? <span>{optionDiscountLabel(opt)}</span> : null}
+                                              {isSelected && it.qty !== 1 ? <span>qty {it.qty}</span> : null}
                                             </div>
                                           </div>
                                           <div className="flex items-center gap-2">

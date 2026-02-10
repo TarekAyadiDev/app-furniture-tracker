@@ -19,7 +19,7 @@ import {
 import { notifyDbChanged, subscribeDbChanges } from "@/storage/notify";
 import { getTownHollywoodExampleBundle } from "@/examples/town-hollywood";
 import { buildRoomNameMap, ensureRoomNames, normalizeRoomName, orderRooms } from "@/lib/rooms";
-import { buildStoreIndex, normalizeStoreName, optionTotalWithStore, orderStores, storeKey } from "@/lib/storePricing";
+import { buildStoreIndex, normalizeStoreName, optionTotalWithoutStore, orderStores, storeKey } from "@/lib/storePricing";
 import { moveAttachmentsParent, type AttachmentRecord } from "@/storage/attachments";
 
 type HomeMeta = NonNullable<ExportBundleV1["home"]>;
@@ -1559,7 +1559,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const base = options.filter((o) => o.syncState !== "deleted" && o.itemId === parentItemId);
       const filtered = base.filter((o) => {
         if (min === null && max === null) return true;
-        const total = optionTotalWithStore(o, storeByName.get(storeKey(o.store)) || null);
+        const total = optionTotalWithoutStore(o);
         if (total === null) return false;
         if (min !== null && total < min) return false;
         if (max !== null && total > max) return false;
@@ -1577,8 +1577,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           const pb = typeof b.priority === "number" ? b.priority : 999999;
           if (pa !== pb) return (pa - pb) * dir;
         } else {
-          const ta = optionTotalWithStore(a, storeByName.get(storeKey(a.store)) || null);
-          const tb = optionTotalWithStore(b, storeByName.get(storeKey(b.store)) || null);
+          const ta = optionTotalWithoutStore(a);
+          const tb = optionTotalWithoutStore(b);
           if (ta === null && tb !== null) return 1;
           if (tb === null && ta !== null) return -1;
           if (ta !== null && tb !== null && ta !== tb) return (ta - tb) * dir;
