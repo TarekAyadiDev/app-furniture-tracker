@@ -379,12 +379,13 @@ export default async function handler(req: any, res: any) {
       const remoteId = forceCreate ? null : isRemoteId(r.remoteId) ? r.remoteId : null;
       const meta = {
         sort: typeof r.sort === "number" ? r.sort : null,
+        recordType: "Room",
         createdAt: typeof r.createdAt === "number" ? r.createdAt : Date.now(),
         updatedAt: typeof r.updatedAt === "number" ? r.updatedAt : Date.now(),
       };
       const fields: any = {
-        "Record Type": "Note",
-        Title: `${rid} notes`,
+        "Record Type": "Room",
+        Title: `${rid} room`,
         Room: rid,
         Notes: buildNotes(r.notes || "", meta),
       };
@@ -475,6 +476,7 @@ export default async function handler(req: any, res: any) {
         extraWarranty: typeof s.extraWarranty === "string" ? s.extraWarranty : null,
         trial: typeof s.trial === "string" ? s.trial : null,
         apr: typeof s.apr === "string" ? s.apr : null,
+        recordType: "Store",
         createdAt: typeof s.createdAt === "number" ? s.createdAt : Date.now(),
         updatedAt: typeof s.updatedAt === "number" ? s.updatedAt : Date.now(),
       };
@@ -581,6 +583,8 @@ export default async function handler(req: any, res: any) {
         sort: typeof o.sort === "number" ? o.sort : null,
         discountType: o.discountType || null,
         discountValue: typeof o.discountValue === "number" ? o.discountValue : null,
+        parentLocalId: parentLocal || null,
+        parentRemoteId: parentRemote || null,
         attachments: sanitizeAttachments(o.attachments),
         createdAt: typeof o.createdAt === "number" ? o.createdAt : Date.now(),
         updatedAt: typeof o.updatedAt === "number" ? o.updatedAt : Date.now(),
@@ -590,7 +594,7 @@ export default async function handler(req: any, res: any) {
         "Record Type": "Option",
         Title: String(o.title || "Option"),
         "Parent Item Record Id": parentRemote,
-        "Parent Item Key": parentLocal || null,
+        "Parent Item Key": parentRemote || parentLocal || null,
         Store: normalizeStoreValue(o.store),
         Link: typeof o.link === "string" ? o.link : null,
         "Promo Code": typeof o.promoCode === "string" ? o.promoCode : null,

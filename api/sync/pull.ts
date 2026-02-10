@@ -38,6 +38,27 @@ function normalizeRoom(room: any) {
   return r || "Living";
 }
 
+function firstString(value: any): string | null {
+  if (typeof value === "string") {
+    const s = value.trim();
+    return s ? s : null;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (typeof entry === "string") {
+        const s = entry.trim();
+        if (s) return s;
+      }
+    }
+  }
+  return null;
+}
+
+function firstRecordId(value: any): string | null {
+  const v = firstString(value);
+  return v && v.startsWith("rec") ? v : null;
+}
+
 function normalizeStatus(status: any) {
   const s = String(status || "").trim();
   const allowed = ["Idea", "Shortlist", "Selected", "Ordered", "Delivered", "Installed"];
@@ -61,8 +82,7 @@ export default async function handler(req: any, res: any) {
       const hasOption = types.has("Option");
       const hasNote = types.has("Note");
       const hasMeasurement = types.has("Measurement");
-      const hasStore = types.has("Store");
-      if (hasItem && (!hasOption || !hasNote || !hasMeasurement || !hasStore)) {
+      if (hasItem && (!hasOption || !hasNote || !hasMeasurement)) {
         // Fallback: view may be filtering out Options/Notes/Measurements.
         records = await listAllRecords({ token, baseId, tableId });
       }
@@ -86,12 +106,12 @@ export default async function handler(req: any, res: any) {
           remoteId: rec.id,
           syncState: "clean",
           name: String(f["Title"] || "").trim() || "Item",
-          room: normalizeRoom(f["Room"]),
+          room: normalizeRoom(firstString(f["Room"]) || f["Room"]),
           category: String(meta?.category || f["Category"] || "Other").trim() || "Other",
           status: normalizeStatus(f["Status"]),
           sort: toNumber(meta?.sort),
           price: toNumber(f["Price"]),
-          selectedOptionId: typeof f["Selected Option Id"] === "string" ? f["Selected Option Id"] : null,
+          selectedOptionId: firstRecordId(f["Selected Option Id"]),
           discountType:
             typeof meta?.discountType === "string"
               ? meta.discountType
@@ -100,7 +120,7 @@ export default async function handler(req: any, res: any) {
                 : null,
           discountValue: toNumber(meta?.discountValue),
           qty: toNumber(f["Quantity"]) ? Math.round(toNumber(f["Quantity"]) as number) : 1,
-          store: typeof f["Store"] === "string" ? f["Store"] : null,
+          store: firstString(f["Store"]),
           link: typeof f["Link"] === "string" ? f["Link"] : null,
           notes: userNotes || null,
           priority: toNumber(f["Priority"] ?? f["Prioirity"]),
@@ -114,7 +134,11 @@ export default async function handler(req: any, res: any) {
       }
 
       if (rt === "Option") {
-        const parentId = String(f["Parent Item Record Id"] || f["Parent Item Key"] || "").trim();
+        const parentId =
+          firstRecordId(f["Parent Item Record Id"]) ||
+          firstRecordId(f["Parent Item Key"]) ||
+          firstRecordId(meta?.parentRemoteId) ||
+          "";
         options.push({
           id: rec.id,
           remoteId: rec.id,
@@ -122,7 +146,7 @@ export default async function handler(req: any, res: any) {
           itemId: parentId,
           title: String(f["Title"] || "").trim() || "Option",
           sort: toNumber(meta?.sort),
-          store: typeof f["Store"] === "string" ? f["Store"] : null,
+          store: firstString(f["Store"]),
           link: typeof f["Link"] === "string" ? f["Link"] : null,
           promoCode: typeof f["Promo Code"] === "string" ? f["Promo Code"] : null,
           price: toNumber(f["Price"]),
@@ -153,7 +177,7 @@ export default async function handler(req: any, res: any) {
           id: rec.id,
           remoteId: rec.id,
           syncState: "clean",
-          room: normalizeRoom(f["Room"]),
+          room: normalizeRoom(firstString(f["Room"]) || f["Room"]),
           label,
           valueIn: valueIn ?? 0,
           sort: toNumber(meta?.sort),
@@ -167,7 +191,7 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
-      if (rt === "Store") {
+      if (rt === "Store" || meta?.recordType === "Store") {
         const name = String(f["Title"] || f["Store"] || "").trim() || "Store";
         stores.push({
           id: rec.id,
@@ -209,18 +233,59 @@ export default async function handler(req: any, res: any) {
         continue;
       }
 
-      if (rt === "Note") {
-        const room = normalizeRoom(f["Room"]);
-        roomsMap.set(room, {
-          id: room,
-          name: room,
-          remoteId: rec.id,
-          syncState: "clean",
-          notes: userNotes || "",
-          sort: toNumber(meta?.sort),
-          createdAt: toNumber(meta?.createdAt) || Date.now(),
-          updatedAt: toNumber(meta?.updatedAt) || Date.now(),
-        });
+      if (rt === "Note" || rt === "Room") {
+        if (meta?.recordType === "Store") {
+          const name = String(f["Title"] || f["Store"] || "").trim() || "Store";
+          stores.push({
+            id: rec.id,
+            remoteId: rec.id,
+            syncState: "clean",
+            name,
+            sort: toNumber(meta?.sort),
+            discountType: typeof meta?.discountType === "string" ? meta.discountType : null,
+            discountValue: toNumber(meta?.discountValue) ?? toNumber(f["Discount Value"] ?? f["Discount"]),
+            shippingCost: toNumber(meta?.shippingCost) ?? toNumber(f["Shipping Cost"] ?? f["Delivery Cost"] ?? f["Shipping"]),
+            deliveryInfo:
+              typeof meta?.deliveryInfo === "string"
+                ? meta.deliveryInfo
+                : typeof f["Delivery Info"] === "string"
+                  ? f["Delivery Info"]
+                  : null,
+            extraWarranty:
+              typeof meta?.extraWarranty === "string"
+                ? meta.extraWarranty
+                : typeof f["Extra Warranty"] === "string"
+                  ? f["Extra Warranty"]
+                  : null,
+            trial:
+              typeof meta?.trial === "string"
+                ? meta.trial
+                : typeof f["Trial"] === "string"
+                  ? f["Trial"]
+                  : null,
+            apr:
+              typeof meta?.apr === "string"
+                ? meta.apr
+                : typeof f["APR"] === "string"
+                  ? f["APR"]
+                  : null,
+            notes: userNotes || null,
+            createdAt: toNumber(meta?.createdAt) || Date.now(),
+            updatedAt: toNumber(meta?.updatedAt) || Date.now(),
+          });
+        } else {
+          const room = normalizeRoom(firstString(f["Room"]) || f["Room"]);
+          roomsMap.set(room, {
+            id: room,
+            name: room,
+            remoteId: rec.id,
+            syncState: "clean",
+            notes: userNotes || "",
+            sort: toNumber(meta?.sort),
+            createdAt: toNumber(meta?.createdAt) || Date.now(),
+            updatedAt: toNumber(meta?.updatedAt) || Date.now(),
+          });
+        }
       }
     }
 

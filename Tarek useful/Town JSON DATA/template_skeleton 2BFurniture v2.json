@@ -51,6 +51,7 @@
       "sort": "OPTIONAL: number for ordering (lower first).",
       "discountType": "OPTIONAL: 'amount' | 'percent' | null.",
       "discountValue": "OPTIONAL: number.",
+      "shippingCost": "OPTIONAL: number. Default delivery/shipping cost applied to options that do not set their own shipping.",
       "deliveryInfo": "OPTIONAL: string.",
       "extraWarranty": "OPTIONAL: string.",
       "trial": "OPTIONAL: string.",

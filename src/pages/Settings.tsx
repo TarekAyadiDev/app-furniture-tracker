@@ -195,11 +195,14 @@ export default function Settings() {
     setPulling(true);
     try {
       const res = await pullNow();
-      toast({ title: "Pulled", description: `Pulled: ${formatSyncCounts(res.pull)}` });
+      const msg = `Pulled: ${formatSyncCounts(res.pull)}`;
+      toast({ title: "Pulled", description: msg });
+      console.info("[Airtable] Pull", msg, res);
       void runHealth();
       return res;
     } catch (err: any) {
       toast({ title: "Pull failed", description: err?.message || "Unknown error" });
+      console.error("[Airtable] Pull failed", err);
       return null;
     } finally {
       setPulling(false);
@@ -211,14 +214,17 @@ export default function Settings() {
     try {
       const res = await pushNow();
       const warning = formatPushWarnings(res.pushErrors);
+      const msg = warning ? `Pushed: ${formatSyncCounts(res.push)} · ${warning}` : `Pushed: ${formatSyncCounts(res.push)}`;
       toast({
         title: warning ? "Pushed with errors" : "Pushed",
-        description: warning ? `Pushed: ${formatSyncCounts(res.push)} · ${warning}` : `Pushed: ${formatSyncCounts(res.push)}`,
+        description: msg,
       });
+      console.info("[Airtable] Push", msg, res);
       void runHealth();
       return res;
     } catch (err: any) {
       toast({ title: "Push failed", description: err?.message || "Unknown error" });
+      console.error("[Airtable] Push failed", err);
       return null;
     } finally {
       setPushing(false);
@@ -233,14 +239,17 @@ export default function Settings() {
     try {
       const res = await pushNow("reset");
       const warning = formatPushWarnings(res.pushErrors);
+      const msg = warning ? `Pushed: ${formatSyncCounts(res.push)} · ${warning}` : `Pushed: ${formatSyncCounts(res.push)}`;
       toast({
         title: warning ? "Reset + pushed with errors" : "Reset + pushed",
-        description: warning ? `Pushed: ${formatSyncCounts(res.push)} · ${warning}` : `Pushed: ${formatSyncCounts(res.push)}`,
+        description: msg,
       });
+      console.info("[Airtable] Reset + push", msg, res);
       void runHealth();
       return res;
     } catch (err: any) {
       toast({ title: "Reset push failed", description: err?.message || "Unknown error" });
+      console.error("[Airtable] Reset push failed", err);
       return null;
     } finally {
       setResetting(false);
