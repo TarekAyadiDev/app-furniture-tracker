@@ -29,6 +29,22 @@ function downloadJson(filename: string, obj: unknown) {
   URL.revokeObjectURL(url);
 }
 
+function formatExportStamp(ts = new Date()) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const y = ts.getFullYear();
+  const m = pad(ts.getMonth() + 1);
+  const d = pad(ts.getDate());
+  const hh = pad(ts.getHours());
+  const mm = pad(ts.getMinutes());
+  return `${y}${m}${d}_${hh}${mm}`;
+}
+
+function makeExportFilename(suffix?: string) {
+  const stamp = formatExportStamp();
+  const base = `furniture_tracker_export_${stamp}`;
+  return suffix ? `${base}_${suffix}.json` : `${base}.json`;
+}
+
 function parseMarkdownTasks(text: string, rooms: Array<{ id: RoomId; name: string }>, fallbackRoom: RoomId) {
   const items: Array<{ title: string; room: RoomId; priority?: number; status: string; category?: string }> = [];
   const roomTags = new Map<string, RoomId>();
@@ -87,6 +103,10 @@ function formatSyncCounts(counts: Record<string, number> | null | undefined) {
   return entries.map(([k, v]) => `${k} ${v}`).join(", ");
 }
 
+function formatWhen(ts: number | null) {
+  return ts ? new Date(ts).toLocaleString() : "Never";
+}
+
 function formatPushWarnings(
   errors: Array<{ entity: string; action: string; title?: string; message: string }> | null | undefined,
 ): string | null {
@@ -107,6 +127,7 @@ export default function Settings() {
     unitPreference,
     lastSyncAt,
     lastSyncSummary,
+    lastPullAt,
     dirtyCounts,
     saveHome,
     savePlanner,
@@ -229,8 +250,7 @@ export default function Settings() {
   async function onExport() {
     try {
       const bundle = await exportBundle();
-      const safeName = (bundle.home?.name || "furnishing-export").replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 64);
-      downloadJson(`${safeName}.json`, bundle);
+      downloadJson(makeExportFilename(), bundle);
       toast({ title: "Exported", description: "Downloaded JSON export." });
     } catch (err: any) {
       toast({ title: "Export failed", description: err?.message || "Unknown error" });
@@ -245,8 +265,7 @@ export default function Settings() {
       const attachment = { version: 1 as const, mergedAt: new Date().toISOString(), template: parsed };
       await savePlanner(attachment);
       const bundle = await exportBundle();
-      const safeName = (bundle.home?.name || "furnishing-export").replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 64);
-      downloadJson(`${safeName}-with-planner.json`, bundle);
+      downloadJson(makeExportFilename("with_planner"), bundle);
       toast({ title: "Merged", description: "Planner saved locally and downloaded merged export." });
     } catch (err: any) {
       setPlannerError(err?.message || "Invalid planner JSON.");
@@ -592,9 +611,12 @@ export default function Settings() {
           Pending changes: items {dirtyCounts.items}, options {dirtyCounts.options}, measurements {dirtyCounts.measurements}, rooms{" "}
           {dirtyCounts.rooms}, stores {dirtyCounts.stores}.
         </div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          Since last pull ({formatWhen(lastPullAt)}): {formatSyncCounts(dirtyCounts as Record<string, number>)} to push.
+        </div>
         <div className="mt-2 text-xs text-muted-foreground">
           Last sync action:{" "}
-          <span className="font-semibold">{lastSyncAt ? new Date(lastSyncAt).toLocaleString() : "Never"}</span>
+          <span className="font-semibold">{formatWhen(lastSyncAt)}</span>
         </div>
         {lastSyncSummary ? (
           <div className="mt-1 text-xs text-muted-foreground">

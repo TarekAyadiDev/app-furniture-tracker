@@ -183,6 +183,7 @@ export async function syncNow() {
   const pull = await pullChanges();
   const summary = { push: push.counts, pull: pull.counts };
   await idbSetMeta("lastSyncAt", Date.now());
+  await idbSetMeta("lastPullAt", Date.now());
   await idbSetMeta("lastSyncSummary", summary);
   notifyDbChanged();
   return summary;
@@ -332,6 +333,7 @@ export async function pullNow() {
   const pull = await pullChanges();
   const summary = { push: {}, pull: pull.counts };
   await idbSetMeta("lastSyncAt", Date.now());
+  await idbSetMeta("lastPullAt", Date.now());
   await idbSetMeta("lastSyncSummary", summary);
   notifyDbChanged();
   return summary;

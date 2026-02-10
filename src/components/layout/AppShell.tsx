@@ -49,7 +49,7 @@ function subtitleForPath(pathname: string) {
 }
 
 export function AppShell() {
-  const { home } = useData();
+  const { items, options } = useData();
   const nav = useNavigate();
   const loc = useLocation();
 
@@ -57,6 +57,8 @@ export function AppShell() {
   const subtitle = subtitleForPath(loc.pathname);
   const showBack = loc.pathname.startsWith("/items/") || (loc.pathname.startsWith("/rooms/") && loc.pathname !== "/rooms");
   const isHome = loc.pathname === "/" || loc.pathname === "/shopping";
+  const totalItems = items.filter((i) => i.syncState !== "deleted").length;
+  const totalOptions = options.filter((o) => o.syncState !== "deleted").length;
 
   return (
     <div className="min-h-screen">
@@ -84,6 +86,9 @@ export function AppShell() {
               <p className="text-xs font-semibold uppercase tracking-widest text-primary/80">{subtitle}</p>
             )}
             <h1 className="truncate font-heading text-xl font-semibold tracking-tight text-foreground">{title}</h1>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Items {totalItems} · Versions {totalOptions}
+            </p>
           </div>
         </div>
       </header>

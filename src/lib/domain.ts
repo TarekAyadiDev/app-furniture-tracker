@@ -170,6 +170,7 @@ export type Store = {
   sort?: number | null;
   discountType?: "amount" | "percent" | null;
   discountValue?: number | null;
+  shippingCost?: number | null;
   deliveryInfo?: string | null;
   extraWarranty?: string | null;
   trial?: string | null;

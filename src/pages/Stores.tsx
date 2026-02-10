@@ -154,6 +154,18 @@ export default function Stores() {
                     </div>
                   </div>
 
+                  <div className="space-y-1.5">
+                    <Label>Shipping cost</Label>
+                    <Input
+                      key={`${store.id}-shipping-${store.shippingCost ?? ""}`}
+                      inputMode="decimal"
+                      defaultValue={typeof store.shippingCost === "number" ? String(store.shippingCost) : ""}
+                      placeholder="$"
+                      className="h-11 text-base"
+                      onBlur={(e) => void updateStore(store.id, { shippingCost: parseNumberOrNull(e.target.value) })}
+                    />
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
                       <Label>Delivery info</Label>

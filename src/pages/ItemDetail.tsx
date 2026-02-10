@@ -19,7 +19,7 @@ import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provena
 import { useToast } from "@/hooks/use-toast";
 import { shareData } from "@/lib/share";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
-import { buildStoreIndex, optionTotalWithStore, storeKey } from "@/lib/storePricing";
+import { buildStoreIndex, optionPreDiscountTotalWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
 
 function optionPreDiscountTotalOrNull(o: Option): number | null {
   const hasAny =
@@ -166,6 +166,7 @@ export default function ItemDetail() {
     createOption,
     updateOption,
     deleteOption,
+    convertOptionToItem,
     sortAndFilterOptions,
   } = useData();
 
@@ -188,8 +189,10 @@ export default function ItemDetail() {
   );
 
   const optionTotalOrNull = useMemo(
-    () => (opt: Option) => optionTotalWithStore(opt, storeByName.get(storeKey(opt.store)) || null),
-    [storeByName],
+    () =>
+      (opt: Option) =>
+        optionTotalWithStore(opt, storeByName.get(storeKey(opt.store || item?.store)) || null),
+    [item?.store, storeByName],
   );
 
   const optionFinalTotal = useMemo(() => (opt: Option) => optionTotalOrNull(opt) ?? 0, [optionTotalOrNull]);
@@ -259,6 +262,12 @@ export default function ItemDetail() {
     if (!selectedOptionId) return null;
     return itemOptions.find((o) => o.id === selectedOptionId) || null;
   }, [itemOptions, selectedOptionId]);
+  const selectedOptions = useMemo(() => {
+    const marked = itemOptions.filter((o) => o.selected);
+    if (marked.length) return marked;
+    if (selectedOptionId) return selectedOption ? [selectedOption] : [];
+    return [];
+  }, [itemOptions, selectedOption, selectedOptionId]);
 
   const optionOnlyOption = useMemo(() => {
     if (!optionOnlyId) return null;
@@ -419,7 +428,24 @@ export default function ItemDetail() {
     storeForItem && (storeForItem.discountType === "amount" || storeForItem.discountType === "percent")
       ? computeDiscountAmount(priceValue, storeForItem.discountType, storeForItem.discountValue ?? null) || 0
       : 0;
-  const effectivePriceValue = priceValue === null ? null : Math.max(0, priceValue - itemDiscountAmount - storeDiscountAmount);
+  const selectedOptionsTotal = useMemo(() => {
+    if (!selectedOptions.length) return null;
+    let total = 0;
+    let hasAny = false;
+    for (const opt of selectedOptions) {
+      const t = optionTotalOrNull(opt);
+      if (t === null) continue;
+      total += t;
+      hasAny = true;
+    }
+    return hasAny ? total : null;
+  }, [optionTotalOrNull, selectedOptions]);
+  const effectivePriceValue =
+    selectedOptionsTotal !== null
+      ? selectedOptionsTotal
+      : priceValue === null
+        ? null
+        : Math.max(0, priceValue - itemDiscountAmount - storeDiscountAmount);
   const inheritedItemPhotos = selectedOptionId ? optionAttachments[selectedOptionId] || [] : [];
   const inheritedItemPhotoLabel = selectedOption ? `Using photos from "${selectedOption.title}".` : undefined;
 
@@ -581,6 +607,17 @@ export default function ItemDetail() {
     }
   }
 
+  async function onPromoteOption(opt: Option) {
+    if (!item) return;
+    try {
+      const newId = await convertOptionToItem(item.id, opt.id);
+      toast({ title: "Moved to items", description: opt.title });
+      nav(`/items/${newId}`);
+    } catch (err: any) {
+      toast({ title: "Move failed", description: err?.message || "Could not move option to items." });
+    }
+  }
+
   async function onShareItem() {
     const roomLabel = roomNameById.get(item.room) || item.room;
     const priceVal = typeof item.price === "number" ? item.price : null;
@@ -702,7 +739,8 @@ export default function ItemDetail() {
     ]);
     const chosen = itemOptions.find((o) => o.id === optionId);
     if (chosen) {
-      const preDiscount = optionPreDiscountTotalOrNull(chosen);
+      const store = storeByName.get(storeKey(chosen.store || item.store)) || null;
+      const preDiscount = optionPreDiscountTotalWithStore(chosen, store);
       const optDiscountType =
         chosen.discountType === "percent" || chosen.discountType === "amount"
           ? chosen.discountType
@@ -715,7 +753,7 @@ export default function ItemDetail() {
         status: "Selected",
         selectedOptionId: chosen.id,
         name: chosen.title || item.name,
-        store: chosen.store ?? null,
+        store: chosen.store || item.store || null,
         link: chosen.link ?? null,
         price: preDiscount ?? null,
         discountType: optDiscountType,
@@ -1038,7 +1076,7 @@ export default function ItemDetail() {
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="item_price">Price (incl. shipping/tax)</Label>
+              <Label htmlFor="item_price">Price (incl. delivery/tax)</Label>
               <Input
                 id="item_price"
                 inputMode="decimal"
@@ -1188,6 +1226,12 @@ export default function ItemDetail() {
                         ? `${storeForItem.discountValue}%`
                         : formatMoneyUSD(storeForItem.discountValue)}
                     </div>
+                  </div>
+                ) : null}
+                {typeof storeForItem.shippingCost === "number" && storeForItem.shippingCost > 0 ? (
+                  <div>
+                    <div className="font-semibold text-foreground">Shipping</div>
+                    <div>{formatMoneyUSD(storeForItem.shippingCost)}</div>
                   </div>
                 ) : null}
                 {storeForItem.deliveryInfo ? (
@@ -1565,7 +1609,7 @@ export default function ItemDetail() {
                               {typeof o.priority === "number" ? <span>priority {o.priority}</span> : null}
                               {formatDimensions(o) !== "-" ? <span>{formatDimensions(o)}</span> : null}
                               {o.price ? <span>price {formatMoneyUSD(o.price)}</span> : null}
-                              {o.shipping ? <span>ship {formatMoneyUSD(o.shipping)}</span> : null}
+                              {o.shipping ? <span>delivery {formatMoneyUSD(o.shipping)}</span> : null}
                               {o.taxEstimate ? <span>tax {formatMoneyUSD(o.taxEstimate)}</span> : null}
                               {optionDiscountLabel(o) ? <span>{optionDiscountLabel(o)}</span> : null}
                             </div>
@@ -1580,6 +1624,9 @@ export default function ItemDetail() {
                             </Button>
                             <Button variant="secondary" onClick={() => void onDuplicateOption(o)}>
                               Duplicate
+                            </Button>
+                            <Button variant="secondary" onClick={() => void onPromoteOption(o)}>
+                              Move to Items
                             </Button>
                             <Button
                               variant="secondary"
@@ -1735,7 +1782,7 @@ export default function ItemDetail() {
                                 />
                               </div>
                               <div className="space-y-1.5">
-                                <Label>Shipping</Label>
+                                <Label>Delivery cost</Label>
                                 <Input
                                   inputMode="decimal"
                                   defaultValue={o.shipping === null || o.shipping === undefined ? "" : String(o.shipping)}

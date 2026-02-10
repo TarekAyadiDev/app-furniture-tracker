@@ -12,7 +12,13 @@ import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
 import { ITEM_STATUSES, type Item, type ItemStatus, type Option, type RoomId, type Store } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
-import { buildStoreIndex, itemDiscountAmountWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
+import {
+  buildStoreIndex,
+  itemDiscountAmountWithStore,
+  optionPreDiscountTotalWithStore,
+  optionTotalWithStore,
+  storeKey,
+} from "@/lib/storePricing";
 import { useToast } from "@/hooks/use-toast";
 import { addAttachment, addAttachmentFromBlob, deleteAttachment, listAttachments, type AttachmentRecord } from "@/storage/attachments";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +32,13 @@ function includesText(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
-function optionTotalOrNull(opt: Option, storeByName: Map<string, Store>): number | null {
-  return optionTotalWithStore(opt, storeByName.get(storeKey(opt.store)) || null);
+function resolveStoreForOption(item: Item, opt: Option, storeByName: Map<string, Store>): Store | null {
+  const key = storeKey(opt.store || item.store);
+  return key ? storeByName.get(key) || null : null;
+}
+
+function optionTotalOrNull(item: Item, opt: Option, storeByName: Map<string, Store>): number | null {
+  return optionTotalWithStore(opt, resolveStoreForOption(item, opt, storeByName));
 }
 
 function optionDiscountLabel(opt: Option): string | null {
@@ -37,23 +48,35 @@ function optionDiscountLabel(opt: Option): string | null {
   return `disc -${formatMoneyUSD(value)}`;
 }
 
-function effectiveItemTotal(item: Item, selected: Option | null, storeByName: Map<string, Store>): number | null {
+function effectiveItemTotal(item: Item, selected: Option[] | null, storeByName: Map<string, Store>): number | null {
+  if (selected && selected.length) {
+    let total = 0;
+    let hasAny = false;
+    for (const opt of selected) {
+      const t = optionTotalOrNull(item, opt, storeByName);
+      if (t === null) continue;
+      total += t;
+      hasAny = true;
+    }
+    return hasAny ? total : null;
+  }
   const price = typeof item.price === "number" ? item.price : null;
   if (price !== null) {
     const store = storeByName.get(storeKey(item.store)) || null;
     const discount = itemDiscountAmountWithStore(item, store) || 0;
     return Math.max(0, price - discount);
   }
-  if (selected) return optionTotalOrNull(selected, storeByName);
   return null;
 }
 
-function pickSelectedOption(item: Item, list: Option[]): Option | null {
+function pickSelectedOptions(item: Item, list: Option[]): Option[] {
+  const marked = list.filter((o) => o.selected);
+  if (marked.length) return marked;
   if (item.selectedOptionId) {
     const found = list.find((o) => o.id === item.selectedOptionId);
-    if (found) return found;
+    if (found) return [found];
   }
-  return list.find((o) => o.selected) || null;
+  return [];
 }
 
 export default function Items() {
@@ -223,7 +246,8 @@ export default function Items() {
         updateOption(option.id, { selected: true }),
         ...others.map((o) => updateOption(o.id, { selected: false })),
       ]);
-      const preDiscountTotal = optionPreDiscountTotalOrNull(option);
+      const store = resolveStoreForOption(item, option, storeByName);
+      const preDiscountTotal = optionPreDiscountTotalWithStore(option, store);
       const optDiscountType =
         option.discountType === "percent" || option.discountType === "amount"
           ? option.discountType
@@ -236,7 +260,7 @@ export default function Items() {
         status: "Selected",
         selectedOptionId: option.id,
         name: option.title || item.name,
-        store: option.store ?? null,
+        store: option.store || item.store || null,
         link: option.link ?? null,
         price: preDiscountTotal ?? null,
         discountType: optDiscountType,
@@ -287,11 +311,11 @@ export default function Items() {
   }, [options]);
 
   const selectedOptionByItem = useMemo(() => {
-    const selected = new Map<string, Option | null>();
+    const selected = new Map<string, Option[]>();
     for (const it of items) {
       if (it.syncState === "deleted") continue;
       const list = optionsByItem.get(it.id) || [];
-      selected.set(it.id, pickSelectedOption(it, list));
+      selected.set(it.id, pickSelectedOptions(it, list));
     }
     return selected;
   }, [items, optionsByItem]);
@@ -300,7 +324,7 @@ export default function Items() {
     const totals = new Map<string, number | null>();
     for (const it of items) {
       if (it.syncState === "deleted") continue;
-      const selected = selectedOptionByItem.get(it.id) || null;
+      const selected = selectedOptionByItem.get(it.id) || [];
       totals.set(it.id, effectiveItemTotal(it, selected, storeByName));
     }
     return totals;
@@ -513,7 +537,8 @@ export default function Items() {
                     <div className="space-y-2">
                       {group.map((it) => {
                         const itemOpts = optionsByItem.get(it.id) || [];
-                        const selectedOpt = selectedOptionByItem.get(it.id) || pickSelectedOption(it, itemOpts);
+                        const selectedOpts = selectedOptionByItem.get(it.id) || pickSelectedOptions(it, itemOpts);
+                        const selectedOpt = selectedOpts.length === 1 ? selectedOpts[0] : null;
                         const displayPrice = effectiveTotals.get(it.id) ?? null;
                         const openOptions = Boolean(openItemOptions[it.id]);
                         const openOptReorder = Boolean(reorderOptionsForItem[it.id]);
@@ -561,6 +586,8 @@ export default function Items() {
                                     {it.priority ? <span>P{it.priority}</span> : null}
                                     {selectedOpt ? (
                                       <span className="font-medium text-foreground">Selected: {selectedOpt.title}</span>
+                                    ) : selectedOpts.length > 1 ? (
+                                      <span className="font-medium text-foreground">Selected: {selectedOpts.length} options</span>
                                     ) : itemOpts.length ? (
                                       <span>{itemOpts.length} option(s)</span>
                                     ) : null}
@@ -621,7 +648,7 @@ export default function Items() {
                                   <DragReorderList
                                     ariaLabel={`Reorder options for ${it.name}`}
                                     items={itemOpts.map((opt) => {
-                                      const total = optionTotalOrNull(opt, storeByName);
+                                      const total = optionTotalOrNull(it, opt, storeByName);
                                       const subtitleParts = [
                                         opt.store ? String(opt.store) : "",
                                         total ? formatMoneyUSD(total) : "",
@@ -640,7 +667,7 @@ export default function Items() {
                                 ) : (
                                   <div className="space-y-2">
                                     {itemOpts.map((opt) => {
-                                      const total = optionTotalOrNull(opt, storeByName);
+                                      const total = optionTotalOrNull(it, opt, storeByName);
                                       const isSelected = selectedOpt?.id === opt.id || opt.selected;
                                       return (
                                         <div key={opt.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-background/70 p-3">

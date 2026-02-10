@@ -65,8 +65,18 @@ export function optionPreDiscountTotalOrNull(opt: Option): number | null {
   return (opt.price || 0) + (opt.shipping || 0) + (opt.taxEstimate || 0);
 }
 
-export function optionBaseDiscountAmount(opt: Option): number {
-  const base = optionPreDiscountTotalOrNull(opt);
+export function optionPreDiscountTotalWithStore(opt: Option, store: Store | null): number | null {
+  const price = typeof opt.price === "number" ? opt.price : null;
+  const tax = typeof opt.taxEstimate === "number" ? opt.taxEstimate : null;
+  const explicitShipping = typeof opt.shipping === "number" ? opt.shipping : null;
+  const fallbackShipping = explicitShipping !== null ? explicitShipping : typeof store?.shippingCost === "number" ? store.shippingCost : null;
+  const hasAny = price !== null || tax !== null || explicitShipping !== null;
+  if (!hasAny) return null;
+  return (price || 0) + (tax || 0) + (fallbackShipping || 0);
+}
+
+export function optionBaseDiscountAmount(opt: Option, baseOverride?: number | null): number {
+  const base = typeof baseOverride === "number" ? baseOverride : optionPreDiscountTotalOrNull(opt);
   const value = typeof opt.discountValue === "number" ? opt.discountValue : null;
   const type = opt.discountType === "percent" || opt.discountType === "amount" ? opt.discountType : null;
   const computed = computeDiscountAmount(base, type, value);
@@ -75,15 +85,15 @@ export function optionBaseDiscountAmount(opt: Option): number {
 }
 
 export function optionDiscountAmountWithStore(opt: Option, store: Store | null): number {
-  const base = optionPreDiscountTotalOrNull(opt);
+  const base = optionPreDiscountTotalWithStore(opt, store);
   if (base === null) return 0;
-  const baseDiscount = optionBaseDiscountAmount(opt);
+  const baseDiscount = optionBaseDiscountAmount(opt, base);
   const storeDiscount = store ? computeDiscountAmount(base, store.discountType, store.discountValue) || 0 : 0;
   return baseDiscount + storeDiscount;
 }
 
 export function optionTotalWithStore(opt: Option, store: Store | null): number | null {
-  const base = optionPreDiscountTotalOrNull(opt);
+  const base = optionPreDiscountTotalWithStore(opt, store);
   if (base === null) return null;
   return base - optionDiscountAmountWithStore(opt, store);
 }

@@ -177,6 +177,7 @@ export default async function handler(req: any, res: any) {
           sort: toNumber(meta?.sort),
           discountType: typeof meta?.discountType === "string" ? meta.discountType : null,
           discountValue: toNumber(meta?.discountValue) ?? toNumber(f["Discount Value"] ?? f["Discount"]),
+          shippingCost: toNumber(meta?.shippingCost) ?? toNumber(f["Shipping Cost"] ?? f["Delivery Cost"] ?? f["Shipping"]),
           deliveryInfo:
             typeof meta?.deliveryInfo === "string"
               ? meta.deliveryInfo

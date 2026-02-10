@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { Actor, ExportBundleV1, ExportBundleV2, Item, Measurement, Option, PlannerAttachmentV1, Provenance, Room, RoomId, Store } from "@/lib/domain";
 import { DEFAULT_ROOMS, ITEM_STATUSES } from "@/lib/domain";
-import { nowMs, parseNumberOrNull } from "@/lib/format";
+import { formatMoneyUSD, nowMs, parseNumberOrNull } from "@/lib/format";
 import { diffItem, diffMeasurement, diffOption, diffStore } from "@/lib/diff";
 import { newId } from "@/lib/id";
 import { sanitizeProvenance } from "@/lib/provenance";
@@ -66,6 +66,7 @@ type DataContextValue = {
   unitPreference: UnitPreference;
   lastSyncAt: number | null;
   lastSyncSummary: SyncSummary | null;
+  lastPullAt: number | null;
   dirtyCounts: { items: number; options: number; measurements: number; rooms: number; stores: number };
 
   saveHome: (home: HomeMeta) => Promise<void>;
@@ -90,6 +91,7 @@ type DataContextValue = {
   createOption: (partial: Partial<Option> & { itemId: string }) => Promise<string>;
   updateOption: UpdateOptionFn;
   deleteOption: (id: string) => Promise<void>;
+  convertOptionToItem: (parentItemId: string, optionId: string) => Promise<string>;
   sortAndFilterOptions: (
     parentItemId: string,
     opts: { sortKey: OptionSortKey; sortDir: OptionSortDir; minPrice?: number | null; maxPrice?: number | null },
@@ -403,6 +405,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
             sort: coerceSort((s as any)?.sort),
             discountType: coerceDiscountType((s as any)?.discountType),
             discountValue: coerceNumberOrNull((s as any)?.discountValue),
+            shippingCost: coerceNumberOrNull((s as any)?.shippingCost),
             deliveryInfo: typeof (s as any)?.deliveryInfo === "string" ? (s as any).deliveryInfo : null,
             extraWarranty: typeof (s as any)?.extraWarranty === "string" ? (s as any).extraWarranty : null,
             trial: typeof (s as any)?.trial === "string" ? (s as any).trial : null,
@@ -696,6 +699,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [unitPreference, setUnitPreferenceState] = useState<UnitPreference>("in");
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
   const [lastSyncSummary, setLastSyncSummary] = useState<SyncSummary | null>(null);
+  const [lastPullAt, setLastPullAt] = useState<number | null>(null);
 
   const saveHome = useCallback(async (next: HomeMeta) => {
     const sanitized = sanitizeHomeMeta(next);
@@ -737,6 +741,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!snap.meta.unitPreference) await idbSetMeta("unitPreference", unitPref);
     const syncAt = typeof snap.meta.lastSyncAt === "number" ? snap.meta.lastSyncAt : null;
     const syncSummary = sanitizeSyncSummary(snap.meta.lastSyncSummary);
+    const pullAt = typeof snap.meta.lastPullAt === "number" ? snap.meta.lastPullAt : null;
 
     const nextStores = snap.stores.slice();
     const storeByKey = new Map<string, Store>();
@@ -760,6 +765,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         sort,
         discountType: null,
         discountValue: null,
+        shippingCost: null,
         deliveryInfo: null,
         extraWarranty: null,
         trial: null,
@@ -795,6 +801,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setUnitPreferenceState(unitPref);
     setLastSyncAt(syncAt);
     setLastSyncSummary(syncSummary);
+    setLastPullAt(pullAt);
 
     setReady(true);
   }, []);
@@ -952,6 +959,83 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     notifyDbChanged();
   }, []);
 
+  function buildItemNotesFromOption(opt: Option) {
+    const parts: string[] = [];
+    if (typeof opt.notes === "string" && opt.notes.trim()) parts.push(opt.notes.trim());
+    const extra: string[] = [];
+    if (opt.promoCode) extra.push(`Promo: ${opt.promoCode}`);
+    if (typeof opt.shipping === "number") extra.push(`Shipping: ${formatMoneyUSD(opt.shipping)}`);
+    if (typeof opt.taxEstimate === "number") extra.push(`Tax: ${formatMoneyUSD(opt.taxEstimate)}`);
+    if (opt.dimensionsText) extra.push(`Dimensions: ${opt.dimensionsText}`);
+    if (extra.length) parts.push(extra.join(" \u00b7 "));
+    return parts.length ? parts.join("\n\n") : null;
+  }
+
+  async function promoteOptionToItem(parent: Item, opt: Option, sortBase: number | null, sortOffset: number, ts: number) {
+    const nextSort = typeof sortBase === "number" ? sortBase + sortOffset : null;
+    const itemDiscountType = opt.discountType ?? (typeof opt.discount === "number" ? "amount" : null);
+    const itemDiscountValue =
+      typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null;
+    const newItemId = newId("i");
+    const nextItem: Item = {
+      id: newItemId,
+      remoteId: null,
+      syncState: "dirty",
+      name: opt.title || "Item",
+      room: parent.room,
+      category: parent.category,
+      status: parent.status,
+      selectedOptionId: null,
+      sort: nextSort,
+      price: typeof opt.price === "number" ? opt.price : null,
+      discountType: itemDiscountType,
+      discountValue: itemDiscountValue,
+      qty: 1,
+      store: opt.store ?? null,
+      link: opt.link ?? null,
+      notes: buildItemNotesFromOption(opt),
+      priority: opt.priority ?? null,
+      tags: coerceTags(opt.tags),
+      dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
+      specs: opt.specs ? { ...opt.specs } : null,
+      provenance: makeHumanCreatedProvenance(opt.provenance, ts),
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    await idbPut("items", nextItem);
+    await idbPut("options", { ...opt, syncState: "deleted", updatedAt: ts });
+    try {
+      await moveAttachmentsParent("option", opt.id, "item", newItemId);
+    } catch {
+      // Ignore attachment move failures; option deletion will still proceed.
+    }
+    return newItemId;
+  }
+
+  const convertOptionToItem = useCallback(async (parentItemId: string, optionId: string) => {
+    const [allItems, allOptions] = await Promise.all([idbGetAll<Item>("items"), idbGetAll<Option>("options")]);
+    const parent = allItems.find((x) => x.id === parentItemId && x.syncState !== "deleted");
+    const opt = allOptions.find((x) => x.id === optionId && x.syncState !== "deleted");
+    if (!parent || !opt) throw new Error("Option not found or already removed.");
+
+    const roomItems = allItems.filter((i) => i.syncState !== "deleted" && i.room === parent.room && i.id !== parent.id);
+    const maxSort = roomItems
+      .map((i) => (typeof i.sort === "number" ? i.sort : null))
+      .filter((v): v is number => typeof v === "number")
+      .reduce((max, v) => Math.max(max, v), 0);
+    const baseSort = typeof parent.sort === "number" ? parent.sort : Number.isFinite(maxSort) ? maxSort + 1 : 0;
+
+    const ts = nowMs();
+    const newItemId = await promoteOptionToItem(parent, opt, baseSort, 0.01, ts);
+
+    if (parent.selectedOptionId === optionId) {
+      await idbPut("items", { ...parent, selectedOptionId: null, updatedAt: ts, syncState: "dirty" });
+    }
+
+    notifyDbChanged();
+    return newItemId;
+  }, []);
+
   const convertItemToOption = useCallback(async (parentItemId: string, sourceItemId: string) => {
     if (parentItemId === sourceItemId) throw new Error("Choose a different item to import.");
     const [allItems, allOptions] = await Promise.all([idbGetAll<Item>("items"), idbGetAll<Option>("options")]);
@@ -977,7 +1061,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     const sourceOptions = allOptions.filter((o) => o.syncState !== "deleted" && o.itemId === sourceItemId);
     const nestedNote =
-      sourceOptions.length > 0 ? `Imported from an item with ${sourceOptions.length} nested option${sourceOptions.length === 1 ? "" : "s"}. Nested options were not migrated.` : "";
+      sourceOptions.length > 0
+        ? `Imported from an item with ${sourceOptions.length} nested option${sourceOptions.length === 1 ? "" : "s"}.`
+        : "";
     const baseNotes = typeof source.notes === "string" ? source.notes.trim() : "";
     const mergedNotes = [baseNotes, nestedNote].filter(Boolean).join("\n\n") || null;
 
@@ -1016,8 +1102,23 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     await idbPut("options", option);
 
     if (sourceOptions.length) {
-      const deletedOptions = sourceOptions.map((o) => ({ ...o, syncState: "deleted", updatedAt: ts }));
-      await idbBulkPut("options", deletedOptions);
+      const roomItems = allItems.filter((i) => i.syncState !== "deleted" && i.room === source.room && i.id !== source.id);
+      const maxSort = roomItems
+        .map((i) => (typeof i.sort === "number" ? i.sort : null))
+        .filter((v): v is number => typeof v === "number")
+        .reduce((max, v) => Math.max(max, v), 0);
+      const baseSort = typeof source.sort === "number" ? source.sort : Number.isFinite(maxSort) ? maxSort + 1 : 0;
+      const orderedChildren = [...sourceOptions].sort((a, b) => {
+        const sa = typeof a.sort === "number" ? a.sort : 999999;
+        const sb = typeof b.sort === "number" ? b.sort : 999999;
+        if (sa !== sb) return sa - sb;
+        return a.title.localeCompare(b.title);
+      });
+      let offset = 0.01;
+      for (const child of orderedChildren) {
+        await promoteOptionToItem(source, child, baseSort, offset, ts);
+        offset += 0.01;
+      }
     }
 
     await idbPut("items", { ...source, syncState: "deleted", updatedAt: ts });
@@ -1218,6 +1319,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       sort,
       discountType: null,
       discountValue: null,
+      shippingCost: null,
       deliveryInfo: null,
       extraWarranty: null,
       trial: null,
@@ -1273,6 +1375,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       name: nextName,
       discountType: typeof patch.discountType === "undefined" ? cur.discountType ?? null : coerceDiscountType(patch.discountType),
       discountValue: typeof patch.discountValue === "undefined" ? cur.discountValue ?? null : coerceNumberOrNull(patch.discountValue),
+      shippingCost: typeof patch.shippingCost === "undefined" ? cur.shippingCost ?? null : coerceNumberOrNull(patch.shippingCost),
       deliveryInfo:
         typeof patch.deliveryInfo === "undefined" ? cur.deliveryInfo ?? null : typeof patch.deliveryInfo === "string" ? patch.deliveryInfo : null,
       extraWarranty:
@@ -1857,6 +1960,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       unitPreference,
       lastSyncAt,
       lastSyncSummary,
+      lastPullAt,
       dirtyCounts,
       saveHome,
       savePlanner,
@@ -1876,6 +1980,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       createOption,
       updateOption,
       deleteOption,
+      convertOptionToItem,
       sortAndFilterOptions,
       createMeasurement,
       updateMeasurement,
@@ -1904,6 +2009,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       unitPreference,
       lastSyncAt,
       lastSyncSummary,
+      lastPullAt,
       dirtyCounts,
       saveHome,
       savePlanner,
@@ -1923,6 +2029,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       createOption,
       updateOption,
       deleteOption,
+      convertOptionToItem,
       sortAndFilterOptions,
       createMeasurement,
       updateMeasurement,

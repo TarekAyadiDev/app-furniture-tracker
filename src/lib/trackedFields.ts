@@ -126,6 +126,7 @@ export const STORE_TRACKED_FIELDS: TrackedFieldSpec<Store>[] = [
   { field: "sort", get: (s) => s.sort, normalize: normalizeOptionalNumber },
   { field: "discountType", get: (s) => s.discountType, normalize: normalizeOptionalString },
   { field: "discountValue", get: (s) => s.discountValue, normalize: normalizeOptionalNumber },
+  { field: "shippingCost", get: (s) => s.shippingCost, normalize: normalizeOptionalNumber },
   { field: "deliveryInfo", get: (s) => s.deliveryInfo, normalize: normalizeOptionalString },
   { field: "extraWarranty", get: (s) => s.extraWarranty, normalize: normalizeOptionalString },
   { field: "trial", get: (s) => s.trial, normalize: normalizeOptionalString },

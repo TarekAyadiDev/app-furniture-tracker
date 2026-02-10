@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import type { Item, ItemStatus, Option, RoomId, Store } from "@/lib/domain";
 import { formatMoneyUSD } from "@/lib/format";
 import { useData } from "@/data/DataContext";
-import { buildStoreIndex, itemDiscountAmountWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
+import { buildStoreIndex, itemDiscountAmountWithStore, optionDiscountAmountWithStore, optionTotalWithStore, storeKey } from "@/lib/storePricing";
 
 type Totals = { planned: number; selected: number; spent: number; discount: number; missingPrice: number; count: number };
 
@@ -14,19 +14,22 @@ function bucketForStatus(status: ItemStatus): keyof Totals | null {
   return null;
 }
 
-function addLine(t: Totals, item: Item, selectedTotals: Map<string, number | null>, storeByName: Map<string, Store>) {
+type SelectedSummary = { total: number | null; discount: number };
+
+function addLine(t: Totals, item: Item, selectedTotals: Map<string, SelectedSummary>, storeByName: Map<string, Store>) {
   t.count += 1;
   const itemPrice = typeof item.price === "number" ? item.price : null;
-  const fallbackPrice = selectedTotals.get(item.id) ?? null;
-  const price = itemPrice ?? fallbackPrice;
+  const summary = selectedTotals.get(item.id) || { total: null, discount: 0 };
+  const useSelected = summary.total !== null;
+  const price = useSelected ? summary.total : itemPrice;
   if (price === null) {
     t.missingPrice += 1;
     return;
   }
   const store = storeByName.get(storeKey(item.store)) || null;
-  const discount = itemPrice !== null ? itemDiscountAmountWithStore(item, store) : null;
+  const discount = useSelected ? summary.discount : itemPrice !== null ? itemDiscountAmountWithStore(item, store) || 0 : 0;
   if (discount) t.discount += discount * (item.qty || 1);
-  const effective = Math.max(0, price - (discount || 0));
+  const effective = useSelected ? price : Math.max(0, price - discount);
   const b = bucketForStatus(item.status);
   if (!b) return;
   t[b] += effective * (item.qty || 1);
@@ -47,13 +50,30 @@ export default function Budget() {
       if (!byItem.has(o.itemId)) byItem.set(o.itemId, []);
       byItem.get(o.itemId)!.push(o);
     }
-    const totals = new Map<string, number | null>();
+    const totals = new Map<string, SelectedSummary>();
     for (const it of activeItems) {
       const list = byItem.get(it.id) || [];
-      let selected = it.selectedOptionId ? list.find((o) => o.id === it.selectedOptionId) : null;
-      if (!selected) selected = list.find((o) => o.selected) || null;
-      const store = selected ? storeByName.get(storeKey(selected.store)) || null : null;
-      totals.set(it.id, selected ? optionTotalWithStore(selected, store) : null);
+      let selectedList = list.filter((o) => o.selected);
+      if (!selectedList.length && it.selectedOptionId) {
+        const selected = list.find((o) => o.id === it.selectedOptionId) || null;
+        if (selected) selectedList = [selected];
+      }
+      if (!selectedList.length) {
+        totals.set(it.id, { total: null, discount: 0 });
+        continue;
+      }
+      let total = 0;
+      let hasAny = false;
+      let discount = 0;
+      for (const opt of selectedList) {
+        const store = storeByName.get(storeKey(opt.store || it.store)) || null;
+        const optTotal = optionTotalWithStore(opt, store);
+        if (optTotal === null) continue;
+        total += optTotal;
+        discount += optionDiscountAmountWithStore(opt, store);
+        hasAny = true;
+      }
+      totals.set(it.id, { total: hasAny ? total : null, discount });
     }
     return totals;
   }, [activeItems, options, storeByName]);
@@ -104,7 +124,7 @@ export default function Budget() {
           </div>
         </div>
         <p className="mt-4 text-xs text-muted-foreground">
-          {totals.count} item(s) tracked • {totals.missingPrice} need pricing • Discounts saved {formatMoneyUSD(totals.discount)}
+          Total items: {totals.count} • {totals.missingPrice} need pricing • Discounts saved {formatMoneyUSD(totals.discount)}
         </p>
       </Card>
 
@@ -134,7 +154,9 @@ export default function Budget() {
                     <p className="mt-0.5 font-semibold text-foreground">{formatMoneyUSD(t.spent)}</p>
                   </div>
                 </div>
-                {t.missingPrice ? <p className="mt-2 text-xs text-muted-foreground">{t.missingPrice} missing price</p> : null}
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Items: {t.count} • {t.missingPrice} missing price
+                </p>
                 {t.discount ? <p className="mt-1 text-xs text-muted-foreground">Discounts saved {formatMoneyUSD(t.discount)}</p> : null}
               </div>
             );

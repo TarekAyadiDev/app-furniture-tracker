@@ -470,6 +470,7 @@ export default async function handler(req: any, res: any) {
         sort: typeof s.sort === "number" ? s.sort : null,
         discountType: s.discountType || null,
         discountValue: typeof s.discountValue === "number" ? s.discountValue : null,
+        shippingCost: typeof s.shippingCost === "number" ? s.shippingCost : null,
         deliveryInfo: typeof s.deliveryInfo === "string" ? s.deliveryInfo : null,
         extraWarranty: typeof s.extraWarranty === "string" ? s.extraWarranty : null,
         trial: typeof s.trial === "string" ? s.trial : null,

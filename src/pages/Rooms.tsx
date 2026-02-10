@@ -94,7 +94,9 @@ export default function Rooms() {
             Add Room
           </Button>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">Rooms organize your furniture across all pages.</p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Rooms organize your furniture across all pages. Total rooms: {orderedRooms.length}.
+        </p>
       </Card>
 
       {orderedRooms.map((room) => {
