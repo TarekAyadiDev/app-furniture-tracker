@@ -93,6 +93,10 @@ export default async function handler(req: any, res: any) {
     const measurements: any[] = [];
     const stores: any[] = [];
     const roomsMap = new Map<string, any>();
+    const itemLocalToRemote = new Map<string, string>();
+    const itemRemoteToLocal = new Map<string, string>();
+    const optionLocalToRemote = new Map<string, string>();
+    const optionRemoteToLocal = new Map<string, string>();
 
     for (const rec of records) {
       const f = rec.fields || {};
@@ -101,8 +105,15 @@ export default async function handler(req: any, res: any) {
 
       if (rt === "Item") {
         const dims = meta?.dimensions || parseDims(f["Dimensions"]) || null;
+        const localIdRaw = typeof meta?.localId === "string" ? meta.localId.trim() : "";
+        const localId = localIdRaw && !localIdRaw.startsWith("rec") ? localIdRaw : "";
+        if (localId) {
+          itemLocalToRemote.set(localId, rec.id);
+          itemRemoteToLocal.set(rec.id, localId);
+        }
+        const itemId = localId || rec.id;
         items.push({
-          id: rec.id,
+          id: itemId,
           remoteId: rec.id,
           syncState: "clean",
           name: String(f["Title"] || "").trim() || "Item",
@@ -134,13 +145,22 @@ export default async function handler(req: any, res: any) {
       }
 
       if (rt === "Option") {
-        const parentId =
-          firstRecordId(f["Parent Item Record Id"]) ||
-          firstRecordId(f["Parent Item Key"]) ||
-          firstRecordId(meta?.parentRemoteId) ||
-          "";
+        const parentRecordId = firstRecordId(f["Parent Item Record Id"]);
+        const parentKey = firstString(f["Parent Item Key"]);
+        const parentRemoteId = firstRecordId(meta?.parentRemoteId);
+        const parentLocalIdRaw = typeof meta?.parentLocalId === "string" ? meta.parentLocalId.trim() : parentKey || "";
+        const parentLocalId = parentLocalIdRaw && !parentLocalIdRaw.startsWith("rec") ? parentLocalIdRaw : "";
+        const localIdRaw = typeof meta?.localId === "string" ? meta.localId.trim() : "";
+        const localId = localIdRaw && !localIdRaw.startsWith("rec") ? localIdRaw : "";
+        if (localId) {
+          optionLocalToRemote.set(localId, rec.id);
+          optionRemoteToLocal.set(rec.id, localId);
+        }
+        const mappedParent = parentRecordId ? itemRemoteToLocal.get(parentRecordId) || parentRecordId : null;
+        const parentId = mappedParent || parentRemoteId || parentLocalId || "";
+        const optionId = localId || rec.id;
         options.push({
-          id: rec.id,
+          id: optionId,
           remoteId: rec.id,
           syncState: "clean",
           itemId: parentId,
@@ -306,6 +326,21 @@ export default async function handler(req: any, res: any) {
           updatedAt: Date.now(),
         },
     );
+
+    for (const opt of options) {
+      if (typeof opt.itemId !== "string" || !opt.itemId) continue;
+      if (opt.itemId.startsWith("rec")) {
+        const mapped = itemRemoteToLocal.get(opt.itemId);
+        if (mapped) opt.itemId = mapped;
+      }
+    }
+    for (const it of items) {
+      if (typeof it.selectedOptionId !== "string" || !it.selectedOptionId) continue;
+      if (it.selectedOptionId.startsWith("rec")) {
+        const mapped = optionRemoteToLocal.get(it.selectedOptionId);
+        if (mapped) it.selectedOptionId = mapped;
+      }
+    }
 
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");

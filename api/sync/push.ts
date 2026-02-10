@@ -167,6 +167,7 @@ export default async function handler(req: any, res: any) {
     const itemUpdates: any[] = [];
     const itemUpdateLocalIds: string[] = [];
     const itemDeletes: string[] = [];
+    const itemIdMap: Record<string, string> = {};
 
     for (const it of items) {
       const localId = String(it.id || "").trim();
@@ -187,6 +188,7 @@ export default async function handler(req: any, res: any) {
         specs: it.specs || null,
         discountType: it.discountType || null,
         discountValue: typeof it.discountValue === "number" ? it.discountValue : null,
+        localId,
         attachments: sanitizeAttachments(it.attachments),
         createdAt: typeof it.createdAt === "number" ? it.createdAt : Date.now(),
         updatedAt: typeof it.updatedAt === "number" ? it.updatedAt : Date.now(),
@@ -212,6 +214,7 @@ export default async function handler(req: any, res: any) {
       if (typeof it.priority === "number") fields[PRIORITY_FIELD] = Math.round(it.priority);
 
       if (remoteId) {
+        itemIdMap[localId] = remoteId;
         itemUpdates.push({ id: remoteId, fields });
         itemUpdateLocalIds.push(localId);
       }
@@ -222,7 +225,6 @@ export default async function handler(req: any, res: any) {
     }
 
     const itemCreateResult = await safeCreateRecords({ token, baseId, tableId, records: itemCreates, typecast: true });
-    const itemIdMap: Record<string, string> = {};
     for (let i = 0; i < itemCreateResult.records.length; i++) {
       const localId = itemCreateLocalIds[i];
       if (!localId) continue;
@@ -570,9 +572,10 @@ export default async function handler(req: any, res: any) {
       }
 
       const parentLocal = String(o.itemId || "").trim();
+      const mappedParentRemote = itemIdMap[parentLocal] || null;
       const parentRemote =
+        mappedParentRemote ||
         (typeof o.parentRemoteId === "string" && isRemoteId(o.parentRemoteId) ? o.parentRemoteId : null) ||
-        itemIdMap[parentLocal] ||
         (isRemoteId(parentLocal) ? parentLocal : null);
       if (!parentRemote) continue; // parent not known yet
 
@@ -585,6 +588,7 @@ export default async function handler(req: any, res: any) {
         discountValue: typeof o.discountValue === "number" ? o.discountValue : null,
         parentLocalId: parentLocal || null,
         parentRemoteId: parentRemote || null,
+        localId,
         attachments: sanitizeAttachments(o.attachments),
         createdAt: typeof o.createdAt === "number" ? o.createdAt : Date.now(),
         updatedAt: typeof o.updatedAt === "number" ? o.updatedAt : Date.now(),
