@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, type DataSource, type Item, type ItemStatus, type Option, type ReviewStatus, type RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, type DataSource, type Item, type ItemStatus, type Option, type ReviewStatus, type RoomId, type SubItem } from "@/lib/domain";
 import { formatMoneyUSD, nowMs, parseNumberOrNull } from "@/lib/format";
 import { computeItemFitWarnings } from "@/lib/fit";
 import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provenance";
@@ -50,6 +50,22 @@ function optionDiscountLabel(o: Option) {
   if (value === null || value <= 0) return null;
   if (o.discountType === "percent") return `disc -${value}%`;
   return `disc -${formatMoneyUSD(value)}`;
+}
+
+function subItemPreDiscountTotalOrNull(sub: SubItem): number | null {
+  const price = typeof sub.price === "number" ? sub.price : null;
+  const tax = typeof sub.taxEstimate === "number" ? sub.taxEstimate : null;
+  const warranty = typeof sub.extraWarrantyCost === "number" ? sub.extraWarrantyCost : null;
+  const hasAny = price !== null || tax !== null || warranty !== null;
+  if (!hasAny) return null;
+  return (price || 0) + (tax || 0) + (warranty || 0);
+}
+
+function subItemTotalOrNull(sub: SubItem): number | null {
+  const base = subItemPreDiscountTotalOrNull(sub);
+  if (base === null) return null;
+  const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
+  return Math.max(0, base - discount);
 }
 
 const CATEGORY_PRESETS: Record<string, string[]> = {
@@ -156,6 +172,7 @@ export default function ItemDetail() {
     measurements,
     items,
     options,
+    subItems,
     orderedStores,
     reorderOptions,
     renameCategory,
@@ -166,6 +183,9 @@ export default function ItemDetail() {
     createOption,
     updateOption,
     deleteOption,
+    createSubItem,
+    updateSubItem,
+    deleteSubItem,
     convertOptionToItem,
     sortAndFilterOptions,
   } = useData();
@@ -174,7 +194,6 @@ export default function ItemDetail() {
   const storeByName = useMemo(() => buildStoreIndex(orderedStores), [orderedStores]);
 
   const item = useMemo(() => items.find((x) => x.id === id), [items, id]);
-  const storeForItem = useMemo(() => (item ? storeByName.get(storeKey(item.store)) || null : null), [item, storeByName]);
   const itemOptions = useMemo(
     () =>
       options
@@ -187,13 +206,58 @@ export default function ItemDetail() {
         }),
     [options, id],
   );
+  const itemHasOptions = itemOptions.length > 0;
 
-  const optionTotalOrNull = useMemo(() => (opt: Option) => optionTotalWithoutStore(opt), []);
+  const subItemsByOption = useMemo(() => {
+    const map = new Map<string, SubItem[]>();
+    for (const s of subItems) {
+      if (s.syncState === "deleted") continue;
+      const key = s.optionId;
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => {
+        const sa = typeof a.sort === "number" ? a.sort : 999999;
+        const sb = typeof b.sort === "number" ? b.sort : 999999;
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      });
+    }
+    return map;
+  }, [subItems]);
+
+  const itemOptionIds = useMemo(() => new Set(itemOptions.map((o) => o.id)), [itemOptions]);
+  const itemOptionSubItems = useMemo(
+    () => subItems.filter((s) => s.syncState !== "deleted" && itemOptionIds.has(s.optionId)),
+    [itemOptionIds, subItems],
+  );
+
+  const optionTotalOrNull = useMemo(() => {
+    return (opt: Option): number | null => {
+      const subs = subItemsByOption.get(opt.id) || [];
+      if (subs.length) {
+        let total = 0;
+        let hasAny = false;
+        for (const sub of subs) {
+          const base = subItemPreDiscountTotalOrNull(sub);
+          if (base === null) continue;
+          const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
+          total += Math.max(0, base - discount);
+          hasAny = true;
+        }
+        return hasAny ? total : null;
+      }
+      return optionTotalWithoutStore(opt);
+    };
+  }, [subItemsByOption]);
 
   const optionFinalTotal = useMemo(() => (opt: Option) => optionTotalOrNull(opt) ?? 0, [optionTotalOrNull]);
 
   const [itemAttachments, setItemAttachments] = useState<AttachmentRecord[]>([]);
   const [optionAttachments, setOptionAttachments] = useState<Record<string, AttachmentRecord[]>>({});
+  const [subItemAttachments, setSubItemAttachments] = useState<Record<string, AttachmentRecord[]>>({});
 
   const [name, setName] = useState("");
   const [room, setRoom] = useState<RoomId>("Living");
@@ -257,12 +321,30 @@ export default function ItemDetail() {
     if (!selectedOptionId) return null;
     return itemOptions.find((o) => o.id === selectedOptionId) || null;
   }, [itemOptions, selectedOptionId]);
+  const displayStoreName = selectedOption?.store || (!itemHasOptions ? item?.store : null);
+  const storeForItem = useMemo(() => {
+    const key = storeKey(displayStoreName);
+    if (!key) return null;
+    return storeByName.get(key) || null;
+  }, [displayStoreName, storeByName]);
   const selectedOptions = useMemo(() => {
     const marked = itemOptions.filter((o) => o.selected);
     if (marked.length) return marked;
     if (selectedOptionId) return selectedOption ? [selectedOption] : [];
     return [];
   }, [itemOptions, selectedOption, selectedOptionId]);
+
+  const selectedOptionSubItems = useMemo(
+    () => selectedOptions.flatMap((opt) => subItemsByOption.get(opt.id) || []),
+    [selectedOptions, subItemsByOption],
+  );
+  const hasSelectedSubItems = selectedOptionSubItems.length > 0;
+  const placeholderFields = itemHasOptions;
+  const placeholderNote = placeholderFields
+    ? hasSelectedSubItems
+      ? "Pricing is handled by the selected option's sub-items. Item-level fields are placeholders only."
+      : "This item is a placeholder for its options. Pricing, store, and links live on the selected option."
+    : null;
 
   const selectedOptionsByItem = useMemo(() => {
     const byItem = new Map<string, Option[]>();
@@ -283,8 +365,19 @@ export default function ItemDetail() {
     }
     return byItem;
   }, [items, options]);
+  const hasOptionsByItem = useMemo(() => {
+    const set = new Set<string>();
+    for (const o of options) {
+      if (o.syncState === "deleted") continue;
+      set.add(o.itemId);
+    }
+    return set;
+  }, [options]);
 
-  const storeAllocation = useMemo(() => computeStoreAllocation(items, selectedOptionsByItem, storeByName), [items, selectedOptionsByItem, storeByName]);
+  const storeAllocation = useMemo(
+    () => computeStoreAllocation(items, selectedOptionsByItem, storeByName, subItemsByOption, hasOptionsByItem),
+    [items, selectedOptionsByItem, storeByName, subItemsByOption, hasOptionsByItem],
+  );
   const itemTotal = item ? storeAllocation.itemTotals.get(item.id) ?? null : null;
   const itemBaseTotal = item ? storeAllocation.itemBaseTotals.get(item.id) ?? null : null;
   const itemStoreKey = item ? storeAllocation.itemStoreKey.get(item.id) || null : null;
@@ -425,6 +518,30 @@ export default function ItemDetail() {
   }, [itemOptions]);
 
   useEffect(() => {
+    let active = true;
+    async function loadSubItemAttachments() {
+      if (!itemOptionSubItems.length) {
+        if (active) setSubItemAttachments({});
+        return;
+      }
+      const entries = await Promise.all(
+        itemOptionSubItems.map(async (sub) => {
+          const rows = await listAttachments("subItem", sub.id);
+          return [sub.id, rows] as const;
+        }),
+      );
+      if (!active) return;
+      const next: Record<string, AttachmentRecord[]> = {};
+      for (const [subId, rows] of entries) next[subId] = rows;
+      setSubItemAttachments(next);
+    }
+    void loadSubItemAttachments();
+    return () => {
+      active = false;
+    };
+  }, [itemOptionSubItems]);
+
+  useEffect(() => {
     setOptionPage(1);
   }, [item?.id, optSortKey, optSortDir, optMinPrice, optMaxPrice]);
 
@@ -447,7 +564,14 @@ export default function ItemDetail() {
   const priceValue = parseNumberOrNull(price);
   const discountValueNum = parseNumberOrNull(discountValue);
   const itemDiscountAmount = computeDiscountAmount(priceValue, discountType, discountValueNum) || 0;
-  const effectivePriceValue = itemTotal !== null ? itemTotal : priceValue === null ? null : Math.max(0, priceValue - itemDiscountAmount);
+  const effectivePriceValue =
+    itemTotal !== null
+      ? itemTotal
+      : itemHasOptions
+        ? null
+        : priceValue === null
+          ? null
+          : Math.max(0, priceValue - itemDiscountAmount);
   const inheritedItemPhotos = selectedOptionId ? optionAttachments[selectedOptionId] || [] : [];
   const inheritedItemPhotoLabel = selectedOption ? `Using photos from "${selectedOption.title}".` : undefined;
 
@@ -463,6 +587,11 @@ export default function ItemDetail() {
     for (const opt of itemOptions) {
       const optAtts = optionAttachments[opt.id] || (await listAttachments("option", opt.id));
       await Promise.all(optAtts.map((att) => deleteAttachment(att.id)));
+      const optSubs = subItemsByOption.get(opt.id) || [];
+      for (const sub of optSubs) {
+        const subAtts = subItemAttachments[sub.id] || (await listAttachments("subItem", sub.id));
+        await Promise.all(subAtts.map((att) => deleteAttachment(att.id)));
+      }
     }
     await deleteItem(item.id);
     nav("/items");
@@ -556,6 +685,26 @@ export default function ItemDetail() {
             addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
           ),
         );
+
+        const optSubItems = subItemsByOption.get(oldId) || [];
+        for (const sub of optSubItems) {
+          const newSubId = await createSubItem({
+            optionId: newOptId,
+            title: sub.title,
+            price: sub.price ?? null,
+            taxEstimate: sub.taxEstimate ?? null,
+            discountValue: sub.discountValue ?? null,
+            extraWarrantyCost: sub.extraWarrantyCost ?? null,
+            notes: sub.notes ?? null,
+            provenance: sub.provenance,
+          });
+          const subAtts = subItemAttachments[sub.id] || (await listAttachments("subItem", sub.id));
+          await Promise.all(
+            subAtts.slice(0, maxAttachments).map((att) =>
+              addAttachmentFromBlob("subItem", newSubId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+            ),
+          );
+        }
       }
 
       toast({ title: "Item duplicated", description: copyName });
@@ -570,6 +719,13 @@ export default function ItemDetail() {
   async function onDeleteOption(opt: Option) {
     const optAtts = optionAttachments[opt.id] || (await listAttachments("option", opt.id));
     await Promise.all(optAtts.map((att) => deleteAttachment(att.id)));
+    const optionSubs = subItemsByOption.get(opt.id) || [];
+    await Promise.all(
+      optionSubs.map(async (sub) => {
+        const atts = subItemAttachments[sub.id] || (await listAttachments("subItem", sub.id));
+        await Promise.all(atts.map((att) => deleteAttachment(att.id)));
+      }),
+    );
     await deleteOption(opt.id);
   }
 
@@ -603,6 +759,25 @@ export default function ItemDetail() {
           addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
         ),
       );
+      const optSubItems = subItemsByOption.get(opt.id) || [];
+      for (const sub of optSubItems) {
+        const newSubId = await createSubItem({
+          optionId: newOptId,
+          title: sub.title,
+          price: sub.price ?? null,
+          taxEstimate: sub.taxEstimate ?? null,
+          discountValue: sub.discountValue ?? null,
+          extraWarrantyCost: sub.extraWarrantyCost ?? null,
+          notes: sub.notes ?? null,
+          provenance: sub.provenance,
+        });
+        const subAtts = subItemAttachments[sub.id] || (await listAttachments("subItem", sub.id));
+        await Promise.all(
+          subAtts.slice(0, maxAttachments).map((att) =>
+            addAttachmentFromBlob("subItem", newSubId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+          ),
+        );
+      }
       toast({ title: "Option duplicated", description: titleCopy });
     } catch (err: any) {
       toast({ title: "Duplicate failed", description: err?.message || "Could not duplicate option." });
@@ -622,30 +797,22 @@ export default function ItemDetail() {
 
   async function onShareItem() {
     const roomLabel = roomNameById.get(item.room) || item.room;
-    const priceVal = typeof item.price === "number" ? item.price : null;
-    const itemDiscount = computeDiscountAmount(
-      priceVal,
-      item.discountType === "percent" ? "percent" : "amount",
-      typeof item.discountValue === "number" ? item.discountValue : null,
-    ) || 0;
-    const storeDiscount =
-      storeForItem && (storeForItem.discountType === "amount" || storeForItem.discountType === "percent")
-        ? computeDiscountAmount(priceVal, storeForItem.discountType, storeForItem.discountValue ?? null) || 0
-        : 0;
-    const shareDiscount = itemDiscount + storeDiscount;
-    const shareTotal = priceVal === null ? null : Math.max(0, priceVal - shareDiscount);
+    const shareTitle = selectedOption ? `${item.name} · ${selectedOption.title}` : item.name;
+    const shareTotal = typeof effectivePriceValue === "number" ? effectivePriceValue : null;
+    const shareStore = displayStoreName;
+    const shareLink = selectedOption?.link || (!itemHasOptions ? item.link : null);
     const parts = [
-      item.name,
+      shareTitle,
       roomLabel ? `Room: ${roomLabel}` : "",
       item.status ? `Status: ${item.status}` : "",
       shareTotal !== null ? `Total: ${formatMoneyUSD(shareTotal)}` : "",
-      item.store ? `Store: ${item.store}` : "",
-      item.link ? `Link: ${item.link}` : "",
+      shareStore ? `Store: ${shareStore}` : "",
+      shareLink ? `Link: ${shareLink}` : "",
     ].filter(Boolean);
     const text = parts.join("\n");
-    const url = item.link || (typeof window !== "undefined" ? window.location.href : undefined);
+    const url = shareLink || (typeof window !== "undefined" ? window.location.href : undefined);
     try {
-      const res = await shareData({ title: item.name, text, url });
+      const res = await shareData({ title: shareTitle, text, url });
       const label = res.method === "share" ? "Shared" : res.method === "clipboard" ? "Copied" : "Ready";
       toast({ title: label, description: "Item details ready to share." });
     } catch (err: any) {
@@ -680,6 +847,19 @@ export default function ItemDetail() {
     await createOption({ itemId: item.id, title });
   }
 
+  async function onAddSubItem(optionId: string) {
+    const title = prompt("Sub-item title (e.g. Mattress protector)")?.trim();
+    if (!title) return;
+    await createSubItem({ optionId, title });
+  }
+
+  async function onDeleteSubItem(sub: SubItem) {
+    if (!confirm(`Delete "${sub.title}"?`)) return;
+    const atts = subItemAttachments[sub.id] || (await listAttachments("subItem", sub.id));
+    await Promise.all(atts.map((att) => deleteAttachment(att.id)));
+    await deleteSubItem(sub.id);
+  }
+
   async function onImportExistingItem() {
     if (!item || !importSelectedId || importBusy) return;
     setImportBusy(true);
@@ -696,28 +876,37 @@ export default function ItemDetail() {
     }
   }
 
-  async function refreshAttachments(parentType: "item" | "option", parentId: string) {
+  async function refreshAttachments(parentType: "item" | "option" | "subItem", parentId: string) {
     const rows = await listAttachments(parentType, parentId);
     if (parentType === "item") {
       setItemAttachments(rows);
-    } else {
+    } else if (parentType === "option") {
       setOptionAttachments((cur) => ({ ...cur, [parentId]: rows }));
+    } else {
+      setSubItemAttachments((cur) => ({ ...cur, [parentId]: rows }));
     }
   }
 
-  async function handleAddAttachments(parentType: "item" | "option", parentId: string, files: FileList | null) {
+  async function handleAddAttachments(parentType: "item" | "option" | "subItem", parentId: string, files: FileList | null) {
     if (!files || !files.length) return;
-    const existing = parentType === "item" ? itemAttachments : optionAttachments[parentId] || [];
+    const existing =
+      parentType === "item" ? itemAttachments : parentType === "option" ? optionAttachments[parentId] || [] : subItemAttachments[parentId] || [];
     const remainingSlots = 3 - existing.length;
     if (remainingSlots <= 0) {
-      toast({ title: "Limit reached", description: "Up to 3 photos per item/option." });
+      toast({
+        title: "Limit reached",
+        description: parentType === "subItem" ? "Up to 3 receipts per sub-item." : "Up to 3 photos per item/option.",
+      });
       return;
     }
     const incoming = Array.from(files)
-      .filter((f) => f.type.startsWith("image/"))
+      .filter((f) => (parentType === "subItem" ? f.type.startsWith("image/") || f.type === "application/pdf" : f.type.startsWith("image/")))
       .slice(0, remainingSlots);
     if (!incoming.length) {
-      toast({ title: "Unsupported file", description: "Please choose an image file." });
+      toast({
+        title: "Unsupported file",
+        description: parentType === "subItem" ? "Please choose a PDF or image file." : "Please choose an image file.",
+      });
       return;
     }
     try {
@@ -728,7 +917,7 @@ export default function ItemDetail() {
     }
   }
 
-  async function handleRemoveAttachment(parentType: "item" | "option", parentId: string, attachmentId: string) {
+  async function handleRemoveAttachment(parentType: "item" | "option" | "subItem", parentId: string, attachmentId: string) {
     await deleteAttachment(attachmentId);
     await refreshAttachments(parentType, parentId);
   }
@@ -741,29 +930,9 @@ export default function ItemDetail() {
     ]);
     const chosen = itemOptions.find((o) => o.id === optionId);
     if (chosen) {
-      const preDiscount = optionPreDiscountTotalOrNull(chosen);
-      const optDiscountType =
-        chosen.discountType === "percent" || chosen.discountType === "amount"
-          ? chosen.discountType
-          : typeof chosen.discount === "number"
-            ? "amount"
-            : null;
-      const optDiscountValue =
-        typeof chosen.discountValue === "number" ? chosen.discountValue : typeof chosen.discount === "number" ? chosen.discount : null;
       const next: Partial<Item> = {
         status: "Selected",
         selectedOptionId: chosen.id,
-        name: chosen.title || item.name,
-        store: chosen.store || item.store || null,
-        link: chosen.link ?? null,
-        price: preDiscount ?? null,
-        discountType: optDiscountType,
-        discountValue: optDiscountValue,
-        priority: typeof chosen.priority === "number" ? chosen.priority : null,
-        tags: chosen.tags ? [...chosen.tags] : null,
-        dimensions: chosen.dimensions ? { ...chosen.dimensions } : undefined,
-        specs: chosen.specs ? { ...chosen.specs } : null,
-        notes: typeof chosen.notes === "string" ? chosen.notes : null,
       };
       await commit(next);
     } else {
@@ -820,13 +989,19 @@ export default function ItemDetail() {
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-xs text-muted-foreground">{roomNameById.get(item.room) || item.room}</div>
-            <div className="truncate text-lg font-semibold">{item.name}</div>
+            <div className="truncate text-lg font-semibold">
+              {item.name}
+              {selectedOption ? <span className="text-sm font-normal text-muted-foreground"> · {selectedOption.title}</span> : null}
+            </div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={item.status} />
               <ReviewStatusBadge status={item.provenance?.reviewStatus} />
               <DataSourceBadge dataSource={item.provenance?.dataSource} />
               {effectivePriceValue !== null ? <span className="text-sm font-semibold">{formatMoneyUSD(effectivePriceValue)}</span> : null}
-              {item.store ? <span className="text-sm text-muted-foreground">{item.store}</span> : null}
+              {displayStoreName ? <span className="text-sm text-muted-foreground">{displayStoreName}</span> : null}
+              {hasSelectedSubItems ? (
+                <span className="text-sm text-muted-foreground">{selectedOptionSubItems.length} sub-item(s)</span>
+              ) : null}
             </div>
             {itemModifiedFields.length ? (
               <div className="mt-2 text-xs text-muted-foreground">
@@ -980,8 +1155,8 @@ export default function ItemDetail() {
 
             {selectedOption ? (
               <div className="rounded-lg border bg-secondary/40 p-3 text-sm">
-                <div className="font-medium">Using selected option: {selectedOption.title}</div>
-                <div className="mt-1 text-xs text-muted-foreground">Parent fields reflect the selected option.</div>
+                <div className="font-medium">Selected option: {selectedOption.title}</div>
+                <div className="mt-1 text-xs text-muted-foreground">Parent details stay as the item; pricing and summaries use this selection.</div>
                 <div className="mt-2">
                   <Button
                     size="sm"
@@ -1075,17 +1250,22 @@ export default function ItemDetail() {
             </div>
           </div>
 
+          {placeholderNote ? (
+            <div className="rounded-lg border bg-secondary/30 p-3 text-xs text-muted-foreground">{placeholderNote}</div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="item_price">Price (incl. delivery/tax)</Label>
               <Input
                 id="item_price"
                 inputMode="decimal"
-                value={price}
+                value={placeholderFields ? "" : price}
                 onChange={(e) => setPrice(e.target.value)}
                 onBlur={() => void commit({ price: parseNumberOrNull(price) })}
                 placeholder="$"
                 className="h-12 text-base"
+                disabled={placeholderFields}
               />
             </div>
             {!itemOptions.length ? (
@@ -1113,12 +1293,14 @@ export default function ItemDetail() {
                 <div className="flex rounded-full border bg-background p-0.5 text-xs">
                   <button
                     type="button"
+                    disabled={placeholderFields}
                     onClick={() => {
                       setDiscountType("amount");
                       void commit({ discountType: "amount" });
                     }}
                     className={[
                       "rounded-full px-3 py-1 text-xs font-medium",
+                      placeholderFields ? "opacity-50" : "",
                       discountType === "amount" ? "bg-foreground text-background" : "text-muted-foreground",
                     ].join(" ")}
                   >
@@ -1126,12 +1308,14 @@ export default function ItemDetail() {
                   </button>
                   <button
                     type="button"
+                    disabled={placeholderFields}
                     onClick={() => {
                       setDiscountType("percent");
                       void commit({ discountType: "percent" });
                     }}
                     className={[
                       "rounded-full px-3 py-1 text-xs font-medium",
+                      placeholderFields ? "opacity-50" : "",
                       discountType === "percent" ? "bg-foreground text-background" : "text-muted-foreground",
                     ].join(" ")}
                   >
@@ -1141,7 +1325,7 @@ export default function ItemDetail() {
               </div>
               <Input
                 inputMode="decimal"
-                value={discountValue}
+                value={placeholderFields ? "" : discountValue}
                 onChange={(e) => setDiscountValue(e.target.value)}
                 onBlur={() => {
                   const v = parseNumberOrNull(discountValue);
@@ -1149,8 +1333,9 @@ export default function ItemDetail() {
                 }}
                 placeholder={discountType === "percent" ? "%" : "$"}
                 className="h-12 text-base"
+                disabled={placeholderFields}
               />
-              {discountValue || (storeSummary && storeSummary.storeDiscount) ? (
+              {!placeholderFields && (discountValue || (storeSummary && storeSummary.storeDiscount)) ? (
                 <div className="text-xs text-muted-foreground">
                   {(() => {
                     const priceVal = parseNumberOrNull(price);
@@ -1174,23 +1359,26 @@ export default function ItemDetail() {
               <div className="text-xs text-muted-foreground">Used for budget totals.</div>
               {typeof itemBaseTotal === "number" ? (
                 <div className="text-xs text-muted-foreground">
-                  Item subtotal{(item?.qty || 1) > 1 ? ` (x${item?.qty})` : ""} {formatMoneyUSD(itemBaseTotal)}
+                  {hasSelectedSubItems ? "Sub-items subtotal" : itemHasOptions ? "Option subtotal" : "Item subtotal"}
+                  {(item?.qty || 1) > 1 ? ` (x${item?.qty})` : ""} {formatMoneyUSD(itemBaseTotal)}
                 </div>
               ) : null}
               {storeSummary ? (
                 <div className="text-xs text-muted-foreground">
                   Store total {formatMoneyUSD(storeSummary.total)}
-                  {storeSummary.storeDiscount || storeSummary.storeShipping
+                  {storeSummary.storeDiscount || storeSummary.storeShipping || storeSummary.storeWarranty || storeSummary.storeTax
                     ? storeAppliedHere
                       ? (() => {
                           const parts: string[] = [];
                           if (storeSummary.storeDiscount) parts.push(`discount -${formatMoneyUSD(storeSummary.storeDiscount)}`);
                           if (storeSummary.storeShipping) parts.push(`shipping ${formatMoneyUSD(storeSummary.storeShipping)}`);
+                          if (storeSummary.storeWarranty) parts.push(`warranty ${formatMoneyUSD(storeSummary.storeWarranty)}`);
+                          if (storeSummary.storeTax) parts.push(`tax ${formatMoneyUSD(storeSummary.storeTax)}`);
                           return parts.length ? ` · ${parts.join(" · ")}` : "";
                         })()
                       : storeSummary.appliedItemId && itemNameById.get(storeSummary.appliedItemId)
-                        ? ` · store adj on ${itemNameById.get(storeSummary.appliedItemId)}`
-                        : " · store adj on another item"
+                        ? ` · store adjustments on ${itemNameById.get(storeSummary.appliedItemId)}`
+                        : " · store adjustments on another item"
                     : ""}
                 </div>
               ) : null}
@@ -1202,7 +1390,8 @@ export default function ItemDetail() {
               <Label htmlFor="item_store">Store</Label>
               <select
                 id="item_store"
-                value={store}
+                value={placeholderFields ? "" : store}
+                disabled={placeholderFields}
                 onChange={(e) => {
                   const next = e.target.value;
                   setStore(next);
@@ -1222,7 +1411,8 @@ export default function ItemDetail() {
               <Label htmlFor="item_link">Link</Label>
               <Input
                 id="item_link"
-                value={link}
+                value={placeholderFields ? "" : link}
+                disabled={placeholderFields}
                 onChange={(e) => setLink(e.target.value)}
                 onBlur={() => void commit({ link: link.trim() || null })}
                 placeholder="https://"
@@ -1262,12 +1452,24 @@ export default function ItemDetail() {
                     <div>{storeForItem.deliveryInfo}</div>
                   </div>
                 ) : null}
-                {storeForItem.extraWarranty ? (
-                  <div>
-                    <div className="font-semibold text-foreground">Extra warranty</div>
-                    <div>{storeForItem.extraWarranty}</div>
-                  </div>
-                ) : null}
+              {storeForItem.extraWarranty ? (
+                <div>
+                  <div className="font-semibold text-foreground">Extra warranty</div>
+                  <div>{storeForItem.extraWarranty}</div>
+                </div>
+              ) : null}
+              {typeof storeForItem.extraWarrantyCost === "number" && storeForItem.extraWarrantyCost > 0 ? (
+                <div>
+                  <div className="font-semibold text-foreground">Extra warranty cost</div>
+                  <div>{formatMoneyUSD(storeForItem.extraWarrantyCost)}</div>
+                </div>
+              ) : null}
+              {typeof storeForItem.taxCost === "number" && storeForItem.taxCost > 0 ? (
+                <div>
+                  <div className="font-semibold text-foreground">Store tax (delivery + warranty)</div>
+                  <div>{formatMoneyUSD(storeForItem.taxCost)}</div>
+                </div>
+              ) : null}
                 {storeForItem.trial ? (
                   <div>
                     <div className="font-semibold text-foreground">Trial</div>
@@ -1594,6 +1796,22 @@ export default function ItemDetail() {
                     const isSelected = selectedOptionId === o.id || o.selected;
                     const isBest = bestOptionId === o.id;
                     const specDraft = optionSpecDrafts[o.id] || { key: "", value: "" };
+                    const optionSubItems = subItemsByOption.get(o.id) || [];
+                    const optionSubSummary = (() => {
+                      if (!optionSubItems.length) return null;
+                      let total = 0;
+                      let hasAny = false;
+                      for (const sub of optionSubItems) {
+                        const base = subItemPreDiscountTotalOrNull(sub);
+                        if (base === null) continue;
+                        const subDiscount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
+                        total += Math.max(0, base - subDiscount);
+                        hasAny = true;
+                      }
+                      if (!hasAny) return null;
+                      return { total };
+                    })();
+                    const optionQty = isSelected ? item?.qty || 1 : 1;
                     return (
                       <Card key={o.id} className={["p-3", isBest ? "border-emerald-200/80 bg-emerald-50/40" : ""].join(" ")}>
                         <div className="flex items-start justify-between gap-3">
@@ -1634,6 +1852,7 @@ export default function ItemDetail() {
                               {o.shipping ? <span>delivery {formatMoneyUSD(o.shipping)}</span> : null}
                               {o.taxEstimate ? <span>tax {formatMoneyUSD(o.taxEstimate)}</span> : null}
                               {optionDiscountLabel(o) ? <span>{optionDiscountLabel(o)}</span> : null}
+                              {optionSubItems.length ? <span>{optionSubItems.length} sub-item(s)</span> : null}
                               {isSelected && (item?.qty || 1) !== 1 ? <span>qty {item?.qty}</span> : null}
                             </div>
                           </button>
@@ -1932,6 +2151,122 @@ export default function ItemDetail() {
                                   return <div className="text-xs text-muted-foreground">Savings: {formatMoneyUSD(amt)}</div>;
                                 })()}
                               </div>
+                            </div>
+
+                            <div className="rounded-lg border bg-secondary/20 p-3">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-sm font-semibold">Sub-items</div>
+                                  <div className="text-xs text-muted-foreground">Parts and line items for this option.</div>
+                                  {optionSubSummary ? (
+                                    <div className="mt-2 text-xs text-muted-foreground">
+                                      Sub-items total {formatMoneyUSD(optionSubSummary.total * optionQty)}
+                                      {optionQty > 1 ? ` (qty ${optionQty})` : ""}
+                                    </div>
+                                  ) : null}
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Button variant="secondary" onClick={() => void onAddSubItem(o.id)}>
+                                    + Add sub-item
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {optionSubItems.length ? (
+                                <div className="mt-4 space-y-3">
+                                  {optionSubItems.map((sub) => {
+                                    const total = subItemTotalOrNull(sub);
+                                    return (
+                                      <Card key={sub.id} className="p-3">
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div className="min-w-0">
+                                            <div className="truncate text-base font-semibold">{sub.title}</div>
+                                            <div className="mt-1 text-xs text-muted-foreground">
+                                              {total !== null ? formatMoneyUSD(total) : "no total"}
+                                            </div>
+                                          </div>
+                                          <Button variant="destructive" size="sm" onClick={() => void onDeleteSubItem(sub)}>
+                                            Delete
+                                          </Button>
+                                        </div>
+
+                                        <div className="mt-3 grid grid-cols-2 gap-3">
+                                          <div className="space-y-1.5">
+                                            <Label>Title</Label>
+                                            <Input
+                                              key={`${sub.id}-title-${sub.title}`}
+                                              defaultValue={sub.title}
+                                              className="h-11 text-base"
+                                              onBlur={(e) => void updateSubItem(sub.id, { title: e.target.value.trim() || "Sub-item" })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Price</Label>
+                                            <Input
+                                              key={`${sub.id}-price-${sub.price ?? ""}`}
+                                              inputMode="decimal"
+                                              defaultValue={typeof sub.price === "number" ? String(sub.price) : ""}
+                                              placeholder="$"
+                                              className="h-11 text-base"
+                                              onBlur={(e) => void updateSubItem(sub.id, { price: parseNumberOrNull(e.target.value) })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Tax estimate</Label>
+                                            <Input
+                                              key={`${sub.id}-tax-${sub.taxEstimate ?? ""}`}
+                                              inputMode="decimal"
+                                              defaultValue={typeof sub.taxEstimate === "number" ? String(sub.taxEstimate) : ""}
+                                              placeholder="$"
+                                              className="h-11 text-base"
+                                              onBlur={(e) => void updateSubItem(sub.id, { taxEstimate: parseNumberOrNull(e.target.value) })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Extra warranty cost</Label>
+                                            <Input
+                                              key={`${sub.id}-warranty-${sub.extraWarrantyCost ?? ""}`}
+                                              inputMode="decimal"
+                                              defaultValue={typeof sub.extraWarrantyCost === "number" ? String(sub.extraWarrantyCost) : ""}
+                                              placeholder="$"
+                                              className="h-11 text-base"
+                                              onBlur={(e) => void updateSubItem(sub.id, { extraWarrantyCost: parseNumberOrNull(e.target.value) })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Discount</Label>
+                                            <Input
+                                              key={`${sub.id}-discount-${sub.discountValue ?? ""}`}
+                                              inputMode="decimal"
+                                              defaultValue={typeof sub.discountValue === "number" ? String(sub.discountValue) : ""}
+                                              placeholder="$"
+                                              className="h-11 text-base"
+                                              onBlur={(e) => void updateSubItem(sub.id, { discountValue: parseNumberOrNull(e.target.value) })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Notes</Label>
+                                            <Input
+                                              key={`${sub.id}-notes-${sub.notes ?? ""}`}
+                                              defaultValue={sub.notes || ""}
+                                              className="h-11 text-base"
+                                              onBlur={(e) => void updateSubItem(sub.id, { notes: e.target.value.trim() || null })}
+                                            />
+                                          </div>
+                                        </div>
+
+                                        <SubItemReceipts
+                                          attachments={subItemAttachments[sub.id] || []}
+                                          onAdd={(files) => void handleAddAttachments("subItem", sub.id, files)}
+                                          onRemove={(attId) => void handleRemoveAttachment("subItem", sub.id, attId)}
+                                        />
+                                      </Card>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="mt-4 text-xs text-muted-foreground">No sub-items yet.</div>
+                              )}
                             </div>
 
                             <div className="space-y-1.5">
@@ -2288,6 +2623,83 @@ export default function ItemDetail() {
           </div>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+function SubItemReceipts({
+  attachments,
+  onAdd,
+  onRemove,
+}: {
+  attachments: AttachmentRecord[];
+  onAdd: (files: FileList | null) => void;
+  onRemove: (id: string) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    const toRevoke: string[] = [];
+    for (const att of attachments) {
+      if (att.sourceUrl) {
+        next[att.id] = att.sourceUrl;
+        continue;
+      }
+      const url = URL.createObjectURL(att.blob);
+      next[att.id] = url;
+      toRevoke.push(url);
+    }
+    setUrls(next);
+    return () => {
+      toRevoke.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [attachments]);
+
+  return (
+    <div className="mt-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-xs font-semibold">Receipts</div>
+        <Button type="button" size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
+          Add receipt
+        </Button>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/pdf,image/*"
+        className="hidden"
+        onChange={(e) => {
+          onAdd(e.target.files);
+          if (fileRef.current) fileRef.current.value = "";
+        }}
+      />
+      {attachments.length ? (
+        <div className="space-y-2">
+          {attachments.map((att) => (
+            <div key={att.id} className="flex items-center justify-between gap-3 rounded-lg border bg-background/60 px-3 py-2 text-xs">
+              <div className="min-w-0">
+                <div className="truncate font-medium">{att.name || "Receipt"}</div>
+                <div className="text-[10px] text-muted-foreground">{att.mime || "file"}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                {urls[att.id] ? (
+                  <a href={urls[att.id]} target="_blank" rel="noreferrer" className="text-primary underline">
+                    View
+                  </a>
+                ) : null}
+                <Button size="sm" variant="secondary" onClick={() => onRemove(att.id)}>
+                  Remove
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-xs text-muted-foreground">No receipts yet.</div>
+      )}
+      <div className="text-[11px] text-muted-foreground">Receipts support PDF or image files.</div>
     </div>
   );
 }

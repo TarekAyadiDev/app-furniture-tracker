@@ -1,4 +1,4 @@
-import type { Item, Option, Store } from "@/lib/domain";
+import type { Item, Option, Store, SubItem } from "@/lib/domain";
 
 export function normalizeStoreName(value: unknown): string {
   return String(value ?? "").trim();
@@ -104,10 +104,27 @@ export function optionTotalWithStore(opt: Option, store: Store | null): number |
   return base - optionDiscountAmountWithStore(opt, store);
 }
 
+function subItemPreDiscountTotalOrNull(sub: SubItem): number | null {
+  const price = typeof sub.price === "number" ? sub.price : null;
+  const tax = typeof sub.taxEstimate === "number" ? sub.taxEstimate : null;
+  const warranty = typeof sub.extraWarrantyCost === "number" ? sub.extraWarrantyCost : null;
+  const hasAny = price !== null || tax !== null || warranty !== null;
+  if (!hasAny) return null;
+  return (price || 0) + (tax || 0) + (warranty || 0);
+}
+
+function subItemDiscountAmount(sub: SubItem, base: number): number {
+  const value = typeof sub.discountValue === "number" ? sub.discountValue : 0;
+  if (value <= 0) return 0;
+  return Math.min(value, base);
+}
+
 export type StoreTotals = {
   total: number;
   storeDiscount: number;
   storeShipping: number;
+  storeWarranty: number;
+  storeTax: number;
   appliedItemId: string | null;
 };
 
@@ -123,6 +140,8 @@ export function computeStoreAllocation(
   items: Item[],
   selectedOptionsByItem: Map<string, Option[]>,
   storeByName: Map<string, Store>,
+  subItemsByOption?: Map<string, SubItem[]>,
+  hasOptionsByItem?: Set<string>,
 ): StoreAllocation {
   const itemTotals = new Map<string, number | null>();
   const itemBaseTotals = new Map<string, number | null>();
@@ -133,6 +152,7 @@ export function computeStoreAllocation(
 
   for (const item of items) {
     if (item.syncState === "deleted") continue;
+    const hasOptions = hasOptionsByItem?.has(item.id) ?? false;
     const selected = selectedOptionsByItem.get(item.id) || [];
     let baseTotal: number | null = null;
     let discountTotal = 0;
@@ -141,6 +161,23 @@ export function computeStoreAllocation(
       let discount = 0;
       let hasAny = false;
       for (const opt of selected) {
+        const subItems = subItemsByOption?.get(opt.id) || [];
+        if (subItems.length) {
+          let hasSubValues = false;
+          for (const sub of subItems) {
+            const preDiscount = subItemPreDiscountTotalOrNull(sub);
+            if (preDiscount === null) continue;
+            const subDiscount = subItemDiscountAmount(sub, preDiscount);
+            base += Math.max(0, preDiscount - subDiscount);
+            discount += subDiscount;
+            hasAny = true;
+            hasSubValues = true;
+          }
+          if (hasSubValues) continue;
+          // If sub-items exist but no values are set, treat as missing for this option.
+          continue;
+        }
+
         const preDiscount = optionPreDiscountTotalOrNull(opt);
         if (preDiscount === null) continue;
         const optDiscountRaw = optionBaseDiscountAmount(opt, preDiscount);
@@ -155,22 +192,25 @@ export function computeStoreAllocation(
         discountTotal = discount * qty;
       }
     } else {
-      const price = typeof item.price === "number" ? item.price : null;
-      if (price !== null) {
-        const itemDiscountRaw = itemBaseDiscountAmount(item) || 0;
-        const itemDiscount = Math.min(itemDiscountRaw, price);
-        const qty = item.qty || 1;
-        baseTotal = Math.max(0, price - itemDiscount) * qty;
-        discountTotal = itemDiscount * qty;
+      if (!hasOptions) {
+        const price = typeof item.price === "number" ? item.price : null;
+        if (price !== null) {
+          const itemDiscountRaw = itemBaseDiscountAmount(item) || 0;
+          const itemDiscount = Math.min(itemDiscountRaw, price);
+          const qty = item.qty || 1;
+          baseTotal = Math.max(0, price - itemDiscount) * qty;
+          discountTotal = itemDiscount * qty;
+        }
       }
     }
 
     itemBaseTotals.set(item.id, baseTotal);
     itemDiscountTotals.set(item.id, discountTotal);
-    let key = storeKey(item.store);
-    if (!key && selected.length) {
-      const fallback = storeKey(selected[0]?.store);
-      if (fallback) key = fallback;
+    let key: string | null = null;
+    if (selected.length) {
+      key = storeKey(selected[0]?.store) || null;
+    } else if (!hasOptions) {
+      key = storeKey(item.store) || null;
     }
     itemStoreKey.set(item.id, key || null);
 
@@ -185,6 +225,8 @@ export function computeStoreAllocation(
   for (const [key, lines] of storeLines.entries()) {
     const store = storeByName.get(key) || null;
     const storeShipping = typeof store?.shippingCost === "number" ? store.shippingCost : 0;
+    const storeWarranty = typeof store?.extraWarrantyCost === "number" ? store.extraWarrantyCost : 0;
+    const storeTax = typeof store?.taxCost === "number" ? store.taxCost : 0;
     let maxLine = lines[0];
     for (const line of lines) {
       if (line.baseTotal > maxLine.baseTotal) maxLine = line;
@@ -194,8 +236,11 @@ export function computeStoreAllocation(
 
     let storeTotal = 0;
     for (const line of lines) {
-      const hasStoreAdjustments = line.itemId === maxLine.itemId && (storeShipping !== 0 || storeDiscount !== 0);
-      const lineTotal = hasStoreAdjustments ? Math.max(0, line.baseTotal + storeShipping - storeDiscount) : line.baseTotal;
+      const hasStoreAdjustments =
+        line.itemId === maxLine.itemId && (storeShipping !== 0 || storeWarranty !== 0 || storeTax !== 0 || storeDiscount !== 0);
+      const lineTotal = hasStoreAdjustments
+        ? Math.max(0, line.baseTotal + storeShipping + storeWarranty + storeTax - storeDiscount)
+        : line.baseTotal;
       const prev = itemTotals.get(line.itemId);
       itemTotals.set(line.itemId, typeof prev === "number" ? prev + lineTotal : lineTotal);
       if (hasStoreAdjustments && storeDiscount) {
@@ -204,7 +249,7 @@ export function computeStoreAllocation(
       storeTotal += lineTotal;
     }
 
-    storeTotals.set(key, { total: storeTotal, storeDiscount, storeShipping, appliedItemId: maxLine.itemId });
+    storeTotals.set(key, { total: storeTotal, storeDiscount, storeShipping, storeWarranty, storeTax, appliedItemId: maxLine.itemId });
   }
 
   return { itemTotals, itemBaseTotals, itemDiscountTotals, itemStoreKey, storeTotals };

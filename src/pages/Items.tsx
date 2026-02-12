@@ -15,7 +15,6 @@ import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import {
   buildStoreIndex,
   computeStoreAllocation,
-  optionPreDiscountTotalOrNull,
   optionTotalWithoutStore,
   storeKey,
 } from "@/lib/storePricing";
@@ -62,10 +61,6 @@ function includesText(haystack: string, needle: string) {
   return haystack.toLowerCase().includes(needle.toLowerCase());
 }
 
-function optionTotalOrNull(opt: Option): number | null {
-  return optionTotalWithoutStore(opt);
-}
-
 function optionDiscountLabel(opt: Option): string | null {
   const value = typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null;
   if (value === null || value <= 0) return null;
@@ -86,8 +81,22 @@ function pickSelectedOptions(item: Item, list: Option[]): Option[] {
 export default function Items() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, options, orderedStores, reorderRooms, reorderItems, reorderOptions, createItem, updateItem, createOption, updateOption } =
-    useData();
+  const {
+    orderedRooms,
+    roomNameById,
+    items,
+    options,
+    subItems,
+    orderedStores,
+    reorderRooms,
+    reorderItems,
+    reorderOptions,
+    createItem,
+    updateItem,
+    createOption,
+    updateOption,
+    createSubItem,
+  } = useData();
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -199,6 +208,26 @@ export default function Items() {
             addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
           ),
         );
+
+        const optSubItems = subItemsByOption.get(oldId) || [];
+        for (const sub of optSubItems) {
+          const newSubId = await createSubItem({
+            optionId: newOptId,
+            title: sub.title,
+            price: sub.price ?? null,
+            taxEstimate: sub.taxEstimate ?? null,
+            discountValue: sub.discountValue ?? null,
+            extraWarrantyCost: sub.extraWarrantyCost ?? null,
+            notes: sub.notes ?? null,
+            provenance: sub.provenance,
+          });
+          const subAtts = await listAttachments("subItem", sub.id);
+          await Promise.all(
+            subAtts.slice(0, maxAttachments).map((att) =>
+              addAttachmentFromBlob("subItem", newSubId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+            ),
+          );
+        }
       }
 
       toast({ title: "Item duplicated", description: copyName });
@@ -253,29 +282,9 @@ export default function Items() {
         updateOption(option.id, { selected: true }),
         ...others.map((o) => updateOption(o.id, { selected: false })),
       ]);
-      const preDiscountTotal = optionPreDiscountTotalOrNull(option);
-      const optDiscountType =
-        option.discountType === "percent" || option.discountType === "amount"
-          ? option.discountType
-          : typeof option.discount === "number"
-            ? "amount"
-            : null;
-      const optDiscountValue =
-        typeof option.discountValue === "number" ? option.discountValue : typeof option.discount === "number" ? option.discount : null;
       await updateItem(item.id, {
         status: "Selected",
         selectedOptionId: option.id,
-        name: option.title || item.name,
-        store: option.store || item.store || null,
-        link: option.link ?? null,
-        price: preDiscountTotal ?? null,
-        discountType: optDiscountType,
-        discountValue: optDiscountValue,
-        priority: typeof option.priority === "number" ? option.priority : null,
-        tags: option.tags ? [...option.tags] : null,
-        dimensions: option.dimensions ? { ...option.dimensions } : undefined,
-        specs: option.specs ? { ...option.specs } : null,
-        notes: typeof option.notes === "string" ? option.notes : null,
       });
     } catch (err: any) {
       toast({ title: "Selection failed", description: err?.message || "Could not select this option." });
@@ -315,6 +324,50 @@ export default function Items() {
     }
     return map;
   }, [options]);
+  const hasOptionsByItem = useMemo(() => new Set(optionsByItem.keys()), [optionsByItem]);
+
+  const subItemsByOption = useMemo(() => {
+    const map = new Map<string, typeof subItems>();
+    for (const s of subItems) {
+      if (s.syncState === "deleted") continue;
+      const key = s.optionId;
+      if (!key) continue;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(s);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => {
+        const sa = typeof a.sort === "number" ? a.sort : 999999;
+        const sb = typeof b.sort === "number" ? b.sort : 999999;
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      });
+    }
+    return map;
+  }, [subItems]);
+
+  const optionTotalOrNull = useMemo(() => {
+    return (opt: Option): number | null => {
+      const subs = subItemsByOption.get(opt.id) || [];
+      if (subs.length) {
+        let total = 0;
+        let hasAny = false;
+        for (const sub of subs) {
+          const price = typeof sub.price === "number" ? sub.price : null;
+          const tax = typeof sub.taxEstimate === "number" ? sub.taxEstimate : null;
+          const warranty = typeof sub.extraWarrantyCost === "number" ? sub.extraWarrantyCost : null;
+          const hasSub = price !== null || tax !== null || warranty !== null;
+          if (!hasSub) continue;
+          const base = (price || 0) + (tax || 0) + (warranty || 0);
+          const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
+          total += Math.max(0, base - discount);
+          hasAny = true;
+        }
+        return hasAny ? total : null;
+      }
+      return optionTotalWithoutStore(opt);
+    };
+  }, [subItemsByOption]);
 
   const selectedOptionByItem = useMemo(() => {
     const selected = new Map<string, Option[]>();
@@ -327,8 +380,8 @@ export default function Items() {
   }, [items, optionsByItem]);
 
   const storeAllocation = useMemo(
-    () => computeStoreAllocation(items, selectedOptionByItem, storeByName),
-    [items, selectedOptionByItem, storeByName],
+    () => computeStoreAllocation(items, selectedOptionByItem, storeByName, subItemsByOption, hasOptionsByItem),
+    [items, selectedOptionByItem, storeByName, subItemsByOption, hasOptionsByItem],
   );
 
   const effectiveTotals = storeAllocation.itemTotals;
@@ -344,8 +397,13 @@ export default function Items() {
       .filter((i) => (statusFilter === "All" ? true : i.status === statusFilter))
       .filter((i) => {
         if (!storeNeedle) return true;
-        if (storeFilter === NO_STORE_FILTER) return !storeKey(i.store);
-        return storeKey(i.store) === storeNeedle;
+        const selected = selectedOptionByItem.get(i.id) || [];
+        const hasOptions = hasOptionsByItem.has(i.id);
+        const selectedKeys = selected.map((o) => storeKey(o.store)).filter(Boolean);
+        const fallbackKey = !hasOptions ? storeKey(i.store) : "";
+        const keys = selectedKeys.length ? selectedKeys : fallbackKey ? [fallbackKey] : [];
+        if (storeFilter === NO_STORE_FILTER) return keys.length === 0;
+        return keys.some((k) => k === storeNeedle);
       })
       .filter((i) => {
         if (min === null && max === null) return true;
@@ -360,7 +418,7 @@ export default function Items() {
         const blob = `${i.name} ${i.category} ${i.store || ""} ${i.notes || ""}`;
         return includesText(blob, needle);
       });
-  }, [items, q, roomFilter, statusFilter, storeFilter, minPrice, maxPrice, effectiveTotals]);
+  }, [items, q, roomFilter, statusFilter, storeFilter, minPrice, maxPrice, effectiveTotals, selectedOptionByItem, hasOptionsByItem]);
 
   const byRoom = useMemo(() => {
     const map = new Map<RoomId, typeof filtered>();
@@ -546,17 +604,32 @@ export default function Items() {
                         const itemOpts = optionsByItem.get(it.id) || [];
                         const selectedOpts = selectedOptionByItem.get(it.id) || pickSelectedOptions(it, itemOpts);
                         const selectedOpt = selectedOpts.length === 1 ? selectedOpts[0] : null;
+                        const selectedSubItems = selectedOpts.flatMap((opt) => subItemsByOption.get(opt.id) || []);
+                        const selectionLabel = selectedOpt
+                          ? selectedOpt.title || "Selected option"
+                          : selectedOpts.length > 1
+                            ? `${selectedOpts.length} selected`
+                            : null;
                         const displayPrice = effectiveTotals.get(it.id) ?? null;
                         const storeKeyForItem = storeAllocation.itemStoreKey.get(it.id) || null;
                         const storeSummary = storeKeyForItem ? storeAllocation.storeTotals.get(storeKeyForItem) || null : null;
-                        const hasStoreAdjustments = Boolean(storeSummary && (storeSummary.storeDiscount || storeSummary.storeShipping));
+                        const hasStoreAdjustments = Boolean(
+                          storeSummary && (storeSummary.storeDiscount || storeSummary.storeShipping || storeSummary.storeWarranty || storeSummary.storeTax),
+                        );
                         const appliedItemId = storeSummary?.appliedItemId || null;
                         const appliedName = appliedItemId ? itemNameById.get(appliedItemId) || null : null;
+                        const displayStore = selectedOpt?.store || (!itemOpts.length ? it.store : null);
                         const openOptions = Boolean(openItemOptions[it.id]);
                         const openOptReorder = Boolean(reorderOptionsForItem[it.id]);
                         const modifiedFields = Array.isArray(it.provenance?.modifiedFields) ? it.provenance.modifiedFields : [];
                         return (
-                          <Card key={it.id} className="p-3">
+                          <Card
+                            key={it.id}
+                            className={[
+                              "p-3 transition-colors",
+                              selectionLabel ? "border-primary/20 bg-secondary/30" : "",
+                            ].join(" ")}
+                          >
                             <div className="flex items-start gap-3">
                               <ItemPhotoStrip itemId={it.id} fallbackOptionId={selectedOpt?.id || null} />
                               <div className="min-w-0 flex-1">
@@ -577,7 +650,10 @@ export default function Items() {
                                   }}
                                 >
                                   <div className="flex items-center justify-between gap-2">
-                                    <div className="truncate text-base font-semibold">{it.name}</div>
+                                    <div className="truncate text-base font-semibold">
+                                      {it.name}
+                                      {selectionLabel ? <span className="text-sm font-normal text-muted-foreground"> · {selectionLabel}</span> : null}
+                                    </div>
                                     <StatusBadge status={it.status} />
                                   </div>
                                   <div className="mt-2 flex flex-wrap gap-2">
@@ -592,17 +668,17 @@ export default function Items() {
                                   </div>
                                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                     <span className="truncate">{it.category || "Other"}</span>
-                                    {it.store ? <span className="truncate">{it.store}</span> : null}
+                                    {displayStore ? <span className="truncate">{displayStore}</span> : null}
                                     {displayPrice !== null ? <span>{formatMoneyUSD(displayPrice)}</span> : <span className="italic">no price</span>}
                                     {it.qty !== 1 && !itemOpts.length ? <span>qty {it.qty}</span> : null}
                                     {it.priority ? <span>P{it.priority}</span> : null}
+                                    {selectedSubItems.length ? <span>{selectedSubItems.length} sub-item(s)</span> : null}
                                     {selectedOpt ? (
-                                      <span className="font-medium text-foreground">
-                                        Selected: {selectedOpt.title}
-                                        {it.qty !== 1 ? ` x${it.qty}` : ""}
+                                      <span className="text-muted-foreground">
+                                        Selected option{it.qty !== 1 ? ` · qty ${it.qty}` : ""}
                                       </span>
                                     ) : selectedOpts.length > 1 ? (
-                                      <span className="font-medium text-foreground">Selected: {selectedOpts.length} options</span>
+                                      <span className="text-muted-foreground">Selected: {selectedOpts.length} options</span>
                                     ) : itemOpts.length ? (
                                       <span>{itemOpts.length} option(s)</span>
                                     ) : null}
@@ -611,12 +687,14 @@ export default function Items() {
                                         Store total {formatMoneyUSD(storeSummary.total)}
                                         {storeSummary.storeDiscount ? ` · discount -${formatMoneyUSD(storeSummary.storeDiscount)}` : ""}
                                         {storeSummary.storeShipping ? ` · shipping ${formatMoneyUSD(storeSummary.storeShipping)}` : ""}
+                                        {storeSummary.storeWarranty ? ` · warranty ${formatMoneyUSD(storeSummary.storeWarranty)}` : ""}
+                                        {storeSummary.storeTax ? ` · tax ${formatMoneyUSD(storeSummary.storeTax)}` : ""}
                                         {hasStoreAdjustments
                                           ? appliedItemId === it.id
-                                            ? " · store discount/shipping applied here"
+                                            ? " · store adjustments applied here"
                                             : appliedName
-                                              ? ` · store discount/shipping on ${appliedName}`
-                                              : " · store discount/shipping on another item"
+                                              ? ` · store adjustments on ${appliedName}`
+                                              : " · store adjustments on another item"
                                           : ""}
                                       </span>
                                     ) : null}

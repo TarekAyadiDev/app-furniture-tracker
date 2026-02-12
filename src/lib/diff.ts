@@ -1,8 +1,9 @@
-import type { Item, Measurement, Option, Room, Store } from "@/lib/domain";
+import type { Item, Measurement, Option, Room, Store, SubItem } from "@/lib/domain";
 import {
   ITEM_TRACKED_FIELDS,
   MEASUREMENT_TRACKED_FIELDS,
   OPTION_TRACKED_FIELDS,
+  SUB_ITEM_TRACKED_FIELDS,
   ROOM_TRACKED_FIELDS,
   STORE_TRACKED_FIELDS,
   type TrackedFieldSpec,
@@ -85,6 +86,10 @@ export function diffItem(existing: Item, incoming: Item): DiffChange[] {
 
 export function diffOption(existing: Option, incoming: Option): DiffChange[] {
   return [...diffBySpecs(existing, incoming, OPTION_TRACKED_FIELDS), ...diffOptionSpecs(existing, incoming)];
+}
+
+export function diffSubItem(existing: SubItem, incoming: SubItem): DiffChange[] {
+  return diffBySpecs(existing, incoming, SUB_ITEM_TRACKED_FIELDS);
 }
 
 export function diffRoom(existing: Room, incoming: Room): DiffChange[] {

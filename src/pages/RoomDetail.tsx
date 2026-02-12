@@ -21,8 +21,6 @@ import {
   suggestCategoryFromTags,
 } from "@/lib/planner";
 
-type Unit = "in" | "cm";
-
 export default function RoomDetail() {
   const { id } = useParams();
   const nav = useNavigate();
@@ -68,21 +66,9 @@ export default function RoomDetail() {
   const [newReviewStatus, setNewReviewStatus] = useState<ReviewStatus>(null);
   const [reorderMode, setReorderMode] = useState(false);
   const [plannerOpen, setPlannerOpen] = useState(false);
+  const [openMeasurements, setOpenMeasurements] = useState<Record<string, boolean>>({});
 
   const labelRef = useRef<HTMLInputElement | null>(null);
-
-  const [editing, setEditing] = useState<null | {
-    id: string;
-    label: string;
-    value: string;
-    unit: Unit;
-    confidence: Measurement["confidence"];
-    forCategory: string;
-    notes: string;
-    dataSource: DataSource;
-    sourceRef: string;
-    reviewStatus: ReviewStatus;
-  }>(null);
 
   async function saveNotes() {
     if (!roomId) return;
@@ -125,50 +111,27 @@ export default function RoomDetail() {
     setNewReviewStatus(null);
   }
 
-  function startEdit(m: Measurement) {
-    setEditing({
-      id: m.id,
-      label: m.label,
-      value: String(m.valueIn),
-      unit: unitPreference,
-      confidence: m.confidence || null,
-      forCategory: m.forCategory || "",
-      notes: m.notes || "",
-      dataSource: m.provenance?.dataSource ?? null,
-      sourceRef: m.provenance?.sourceRef ?? "",
-      reviewStatus: m.provenance?.reviewStatus ?? null,
-    });
+  function measurementValueInput(valueIn: number) {
+    const raw = unitPreference === "cm" ? inchesToCm(valueIn) : valueIn;
+    if (!Number.isFinite(raw)) return "";
+    const rounded = Math.round(raw * 100) / 100;
+    return String(rounded);
   }
 
-  async function saveEdit() {
-    if (!editing) return;
-    const lbl = editing.label.trim();
-    const val = parseNumberOrNull(editing.value);
-    if (!lbl || val === null) return;
-    const valueIn = editing.unit === "cm" ? cmToInches(val) : val;
-    const ts = nowMs();
-    const cur = list.find((m) => m.id === editing.id) || null;
-    const baseProv = {
-      ...(cur?.provenance || {}),
-      dataSource: editing.dataSource,
-      sourceRef: editing.sourceRef.trim() || null,
-      reviewStatus: editing.reviewStatus,
+  function buildMeasurementProvenance(
+    measurement: Measurement,
+    patch: { dataSource?: DataSource; sourceRef?: string | null; reviewStatus?: ReviewStatus | null },
+  ) {
+    const at = nowMs();
+    const base = {
+      ...(measurement.provenance || {}),
+      dataSource: typeof patch.dataSource !== "undefined" ? patch.dataSource : measurement.provenance?.dataSource ?? null,
+      sourceRef: typeof patch.sourceRef !== "undefined" ? patch.sourceRef : measurement.provenance?.sourceRef ?? null,
+      reviewStatus: typeof patch.reviewStatus !== "undefined" ? patch.reviewStatus : measurement.provenance?.reviewStatus ?? null,
     };
-    const provenance =
-      editing.reviewStatus === "verified"
-        ? markProvenanceVerified(baseProv, ts)
-        : editing.reviewStatus === "needs_review"
-          ? markProvenanceNeedsReview(baseProv, ts)
-          : baseProv;
-    await updateMeasurement(editing.id, {
-      label: lbl,
-      valueIn,
-      confidence: editing.confidence || null,
-      forCategory: editing.forCategory.trim() || null,
-      notes: editing.notes.trim() || null,
-      provenance,
-    });
-    setEditing(null);
+    if (base.reviewStatus === "verified") return markProvenanceVerified(base, at);
+    if (base.reviewStatus === "needs_review") return markProvenanceNeedsReview(base, at);
+    return base;
   }
 
   const editMeasurementId = useMemo(() => {
@@ -179,27 +142,16 @@ export default function RoomDetail() {
 
   useEffect(() => {
     if (!editMeasurementId) return;
-    if (editing) return;
     const match = list.find((m) => m.id === editMeasurementId) || null;
     if (!match) return;
-    setEditing({
-      id: match.id,
-      label: match.label,
-      value: String(match.valueIn),
-      unit: unitPreference,
-      confidence: match.confidence || null,
-      forCategory: match.forCategory || "",
-      notes: match.notes || "",
-      dataSource: match.provenance?.dataSource ?? null,
-      sourceRef: match.provenance?.sourceRef ?? "",
-      reviewStatus: match.provenance?.reviewStatus ?? null,
-    });
+    setOpenMeasurements((cur) => ({ ...cur, [match.id]: true }));
+    if (typeof document !== "undefined") {
+      setTimeout(() => {
+        document.getElementById(`measurement-${match.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 0);
+    }
     nav({ pathname: loc.pathname, search: "" }, { replace: true });
-  }, [editMeasurementId, editing, list, loc.pathname, nav]);
-
-  useEffect(() => {
-    setEditing((cur) => (cur ? { ...cur, unit: unitPreference } : cur));
-  }, [unitPreference]);
+  }, [editMeasurementId, list, loc.pathname, nav]);
 
   const itemsInRoom = useMemo(() => {
     if (!roomId) return [];
@@ -266,6 +218,194 @@ export default function RoomDetail() {
     const missing = total - captured - maybe;
     return { total, captured, maybe, missing };
   }, [plannerMatches]);
+
+  const renderMeasurementCard = (m: Measurement, size: "md" | "sm" = "md") => {
+    const isOpen = Boolean(openMeasurements[m.id]);
+    const labelClass = size === "md" ? "text-base" : "text-sm";
+    const valueClass = size === "md" ? "text-sm" : "text-xs";
+    const buttonSize: "default" | "sm" = size === "md" ? "default" : "sm";
+    const valueDefault = measurementValueInput(m.valueIn);
+    return (
+      <Card key={m.id} id={`measurement-${m.id}`} className={size === "md" ? "p-3" : "p-3"}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className={`truncate font-semibold ${labelClass}`}>{m.label}</div>
+            <div className={`mt-1 text-muted-foreground ${valueClass}`}>{formatInAndCm(m.valueIn)}</div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <ReviewStatusBadge status={m.provenance?.reviewStatus} />
+              <DataSourceBadge dataSource={m.provenance?.dataSource} />
+              {m.provenance?.sourceRef ? (
+                <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
+                  {m.provenance.sourceRef}
+                </span>
+              ) : null}
+            </div>
+            {Array.isArray(m.provenance?.modifiedFields) && m.provenance?.modifiedFields.length ? (
+              <div className="mt-1 text-xs text-muted-foreground">
+                Changed: {m.provenance.modifiedFields.slice(0, 4).join(", ")}
+                {m.provenance.modifiedFields.length > 4 ? ` +${m.provenance.modifiedFields.length - 4}` : ""}
+              </div>
+            ) : null}
+            {m.confidence ? <div className="mt-1 text-xs text-muted-foreground">Confidence: {m.confidence}</div> : null}
+            {m.notes ? <div className="mt-2 whitespace-pre-wrap text-sm">{m.notes}</div> : null}
+          </div>
+          <div className="flex shrink-0 flex-col gap-2">
+            <Button
+              size={buttonSize}
+              variant="secondary"
+              onClick={() => setOpenMeasurements((cur) => ({ ...cur, [m.id]: !isOpen }))}
+            >
+              {isOpen ? "Hide" : "Edit"}
+            </Button>
+          </div>
+        </div>
+
+        {isOpen ? (
+          <div className="mt-4 space-y-3 border-t pt-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-3 space-y-1.5">
+                <Label>Label</Label>
+                <Input
+                  key={`${m.id}-label-${m.label}`}
+                  defaultValue={m.label}
+                  onBlur={(e) => {
+                    const next = e.target.value.trim();
+                    if (!next) {
+                      e.currentTarget.value = m.label;
+                      return;
+                    }
+                    if (next !== m.label) void updateMeasurement(m.id, { label: next });
+                  }}
+                  className="h-11 text-base"
+                />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label>Value</Label>
+                <Input
+                  key={`${m.id}-value-${unitPreference}-${m.valueIn}`}
+                  inputMode="decimal"
+                  defaultValue={valueDefault}
+                  onBlur={(e) => {
+                    const raw = parseNumberOrNull(e.target.value);
+                    if (raw === null) {
+                      e.currentTarget.value = valueDefault;
+                      return;
+                    }
+                    const valueIn = unitPreference === "cm" ? cmToInches(raw) : raw;
+                    void updateMeasurement(m.id, { valueIn });
+                  }}
+                  className="h-11 text-base"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Unit</Label>
+                <select
+                  value={unitPreference}
+                  onChange={(e) => void setUnitPreference(e.target.value === "cm" ? "cm" : "in")}
+                  className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                >
+                  <option value="in">in</option>
+                  <option value="cm">cm</option>
+                </select>
+              </div>
+              <div className="col-span-3 grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Confidence</Label>
+                  <select
+                    value={m.confidence || ""}
+                    onChange={(e) => void updateMeasurement(m.id, { confidence: (e.target.value as Measurement["confidence"]) || null })}
+                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                  >
+                    <option value="">(none)</option>
+                    <option value="low">low</option>
+                    <option value="med">med</option>
+                    <option value="high">high</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>For category (optional)</Label>
+                  <Input
+                    key={`${m.id}-for-${m.forCategory ?? ""}`}
+                    defaultValue={m.forCategory || ""}
+                    onBlur={(e) => void updateMeasurement(m.id, { forCategory: e.target.value.trim() || null })}
+                    className="h-11 text-base"
+                    placeholder="Sofa, Dining Table..."
+                  />
+                </div>
+              </div>
+              <div className="col-span-3 space-y-1.5">
+                <Label>Notes</Label>
+                <Textarea
+                  key={`${m.id}-notes-${m.notes ?? ""}`}
+                  defaultValue={m.notes || ""}
+                  onBlur={(e) => void updateMeasurement(m.id, { notes: e.target.value.trim() || null })}
+                  className="min-h-[72px] resize-none text-base"
+                />
+              </div>
+              <div className="col-span-3 grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Data source</Label>
+                  <select
+                    value={m.provenance?.dataSource || ""}
+                    onChange={(e) => {
+                      const next = (e.target.value as DataSource) || null;
+                      const provenance = buildMeasurementProvenance(m, { dataSource: next });
+                      void updateMeasurement(m.id, { provenance });
+                    }}
+                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                  >
+                    <option value="">(none)</option>
+                    <option value="concrete">Concrete</option>
+                    <option value="estimated">Estimated</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Review status</Label>
+                  <select
+                    value={m.provenance?.reviewStatus || ""}
+                    onChange={(e) => {
+                      const next = (e.target.value as ReviewStatus) || null;
+                      const provenance = buildMeasurementProvenance(m, { reviewStatus: next });
+                      void updateMeasurement(m.id, { provenance });
+                    }}
+                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
+                  >
+                    <option value="">(none)</option>
+                    <option value="needs_review">Needs review</option>
+                    <option value="verified">Verified</option>
+                    <option value="ai_modified">AI modified</option>
+                  </select>
+                </div>
+              </div>
+              <div className="col-span-3 space-y-1.5">
+                <Label>Source ref</Label>
+                <Input
+                  key={`${m.id}-source-${m.provenance?.sourceRef ?? ""}`}
+                  defaultValue={m.provenance?.sourceRef || ""}
+                  onBlur={(e) => {
+                    const provenance = buildMeasurementProvenance(m, { sourceRef: e.target.value.trim() || null });
+                    void updateMeasurement(m.id, { provenance });
+                  }}
+                  className="h-11 text-base"
+                  placeholder='e.g. "Tape measure 2026-02"'
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t pt-3">
+              <div className="text-xs text-muted-foreground">Delete this measurement if it is no longer needed.</div>
+              <Button
+                size={buttonSize}
+                variant="destructive"
+                onClick={() => void deleteMeasurement(m.id)}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Card>
+    );
+  };
 
   if (!roomId) {
     return (
@@ -524,165 +664,9 @@ export default function RoomDetail() {
           </div>
         </div>
 
-        {editing ? (
-          <div className="mt-4 rounded-lg border bg-accent p-3">
-            <div className="text-sm font-semibold">Edit measurement</div>
-            <div className="mt-3 grid grid-cols-3 gap-3">
-              <div className="col-span-3 space-y-1.5">
-                <Label>Label</Label>
-                <Input
-                  value={editing.label}
-                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, label: e.target.value } : cur))}
-                  className="h-11 text-base"
-                />
-              </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label>Value</Label>
-                <Input
-                  inputMode="decimal"
-                  value={editing.value}
-                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, value: e.target.value } : cur))}
-                  className="h-11 text-base"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Unit</Label>
-                <select
-                  value={editing.unit}
-                  onChange={(e) => {
-                    const next = e.target.value as Unit;
-                    void setUnitPreference(next);
-                    setEditing((cur) => (cur ? { ...cur, unit: next } : cur));
-                  }}
-                  className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                >
-                  <option value="in">in</option>
-                  <option value="cm">cm</option>
-                </select>
-              </div>
-              <div className="col-span-3 flex gap-2">
-                <Button className="h-11 flex-1" onClick={() => void saveEdit()}>
-                  Save
-                </Button>
-                <Button variant="secondary" className="h-11 flex-1" onClick={() => setEditing(null)}>
-                  Cancel
-                </Button>
-              </div>
-              <div className="col-span-3 grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Confidence</Label>
-                  <select
-                    value={editing.confidence || ""}
-                    onChange={(e) =>
-                      setEditing((cur) => (cur ? { ...cur, confidence: (e.target.value as Measurement["confidence"]) || null } : cur))
-                    }
-                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                  >
-                    <option value="">(none)</option>
-                    <option value="low">low</option>
-                    <option value="med">med</option>
-                    <option value="high">high</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>For category (optional)</Label>
-                  <Input
-                    value={editing.forCategory}
-                    onChange={(e) => setEditing((cur) => (cur ? { ...cur, forCategory: e.target.value } : cur))}
-                    className="h-11 text-base"
-                    placeholder="Sofa, Dining Table..."
-                  />
-                </div>
-              </div>
-              <div className="col-span-3 space-y-1.5">
-                <Label>Notes</Label>
-                <Input
-                  value={editing.notes}
-                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, notes: e.target.value } : cur))}
-                  className="h-11 text-base"
-                />
-              </div>
-              <div className="col-span-3 grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Data source</Label>
-                  <select
-                    value={editing.dataSource || ""}
-                    onChange={(e) => setEditing((cur) => (cur ? { ...cur, dataSource: (e.target.value as DataSource) || null } : cur))}
-                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                  >
-                    <option value="">(none)</option>
-                    <option value="concrete">Concrete</option>
-                    <option value="estimated">Estimated</option>
-                  </select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Review status</Label>
-                  <select
-                    value={editing.reviewStatus || ""}
-                    onChange={(e) =>
-                      setEditing((cur) => (cur ? { ...cur, reviewStatus: (e.target.value as ReviewStatus) || null } : cur))
-                    }
-                    className="h-11 w-full rounded-md border bg-background px-3 text-base"
-                  >
-                    <option value="">(none)</option>
-                    <option value="needs_review">Needs review</option>
-                    <option value="verified">Verified</option>
-                    <option value="ai_modified">AI modified</option>
-                  </select>
-                </div>
-              </div>
-              <div className="col-span-3 space-y-1.5">
-                <Label>Source ref</Label>
-                <Input
-                  value={editing.sourceRef}
-                  onChange={(e) => setEditing((cur) => (cur ? { ...cur, sourceRef: e.target.value } : cur))}
-                  className="h-11 text-base"
-                  placeholder='e.g. "Tape measure 2026-02"'
-                />
-              </div>
-            </div>
-          </div>
-        ) : null}
-
         <div className="mt-4 space-y-2">
           {generalMeasurements.length ? (
-            generalMeasurements.map((m) => (
-              <Card key={m.id} className="p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-base font-semibold">{m.label}</div>
-                    <div className="mt-1 text-sm text-muted-foreground">{formatInAndCm(m.valueIn)}</div>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <ReviewStatusBadge status={m.provenance?.reviewStatus} />
-                      <DataSourceBadge dataSource={m.provenance?.dataSource} />
-                      {m.provenance?.sourceRef ? (
-                        <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                          {m.provenance.sourceRef}
-                        </span>
-                      ) : null}
-                    </div>
-                    {Array.isArray(m.provenance?.modifiedFields) && m.provenance?.modifiedFields.length ? (
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Changed: {m.provenance.modifiedFields.slice(0, 4).join(", ")}
-                        {m.provenance.modifiedFields.length > 4 ? ` +${m.provenance.modifiedFields.length - 4}` : ""}
-                      </div>
-                    ) : null}
-                    {m.confidence ? (
-                      <div className="mt-1 text-xs text-muted-foreground">Confidence: {m.confidence}</div>
-                    ) : null}
-                    {m.notes ? <div className="mt-2 whitespace-pre-wrap text-sm">{m.notes}</div> : null}
-                  </div>
-                  <div className="flex shrink-0 flex-col gap-2">
-                    <Button variant="secondary" onClick={() => startEdit(m)}>
-                      Edit
-                    </Button>
-                    <Button variant="destructive" onClick={() => void deleteMeasurement(m.id)}>
-                      Delete
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))
+            generalMeasurements.map((m) => renderMeasurementCard(m, "md"))
           ) : (
             <div className="text-sm text-muted-foreground">No general measurements yet.</div>
           )}
@@ -695,43 +679,7 @@ export default function RoomDetail() {
               <div key={cat} className="rounded-lg border bg-background p-3">
                 <div className="text-sm font-semibold">{cat}</div>
                 <div className="mt-2 space-y-2">
-                  {arr.map((m) => (
-                    <div key={m.id} className="rounded-md border bg-background p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold">{m.label}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{formatInAndCm(m.valueIn)}</div>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <ReviewStatusBadge status={m.provenance?.reviewStatus} />
-                            <DataSourceBadge dataSource={m.provenance?.dataSource} />
-                            {m.provenance?.sourceRef ? (
-                              <span className="inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground">
-                                {m.provenance.sourceRef}
-                              </span>
-                            ) : null}
-                          </div>
-                          {Array.isArray(m.provenance?.modifiedFields) && m.provenance?.modifiedFields.length ? (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              Changed: {m.provenance.modifiedFields.slice(0, 4).join(", ")}
-                              {m.provenance.modifiedFields.length > 4 ? ` +${m.provenance.modifiedFields.length - 4}` : ""}
-                            </div>
-                          ) : null}
-                          {m.confidence ? (
-                            <div className="mt-1 text-xs text-muted-foreground">Confidence: {m.confidence}</div>
-                          ) : null}
-                          {m.notes ? <div className="mt-2 whitespace-pre-wrap text-sm">{m.notes}</div> : null}
-                        </div>
-                        <div className="flex shrink-0 flex-col gap-2">
-                          <Button size="sm" variant="secondary" onClick={() => startEdit(m)}>
-                            Edit
-                          </Button>
-                          <Button size="sm" variant="destructive" onClick={() => void deleteMeasurement(m.id)}>
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                  {arr.map((m) => renderMeasurementCard(m, "sm"))}
                 </div>
               </div>
             ))}

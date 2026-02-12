@@ -1,9 +1,9 @@
-import type { Item, Measurement, Option, Room, Store } from "@/lib/domain";
+import type { Item, Measurement, Option, Room, Store, SubItem } from "@/lib/domain";
 
 const DB_NAME = "furnishing-tracker";
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 
-type StoreName = "items" | "options" | "measurements" | "rooms" | "stores" | "meta" | "attachments";
+type StoreName = "items" | "options" | "subItems" | "measurements" | "rooms" | "stores" | "meta" | "attachments";
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
@@ -26,6 +26,17 @@ function openDb(): Promise<IDBDatabase> {
         const store = db.createObjectStore("options", { keyPath: "id" });
         store.createIndex("itemId", "itemId", { unique: false });
         store.createIndex("updatedAt", "updatedAt", { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains("subItems")) {
+        const store = db.createObjectStore("subItems", { keyPath: "id" });
+        store.createIndex("optionId", "optionId", { unique: false });
+        store.createIndex("updatedAt", "updatedAt", { unique: false });
+      } else {
+        const store = req.transaction?.objectStore("subItems");
+        if (store && !store.indexNames.contains("optionId")) {
+          store.createIndex("optionId", "optionId", { unique: false });
+        }
       }
 
       if (!db.objectStoreNames.contains("measurements")) {
@@ -136,9 +147,10 @@ export async function idbBulkPut<T>(store: StoreName, values: T[]): Promise<void
 }
 
 export async function idbResetAll(): Promise<void> {
-  await withTx(["items", "options", "measurements", "rooms", "stores", "attachments", "meta"], "readwrite", async (tx) => {
+  await withTx(["items", "options", "subItems", "measurements", "rooms", "stores", "attachments", "meta"], "readwrite", async (tx) => {
     tx.objectStore("items").clear();
     tx.objectStore("options").clear();
+    tx.objectStore("subItems").clear();
     tx.objectStore("measurements").clear();
     tx.objectStore("rooms").clear();
     tx.objectStore("stores").clear();
@@ -151,6 +163,7 @@ export async function idbResetAll(): Promise<void> {
 export type DbSnapshot = {
   items: Item[];
   options: Option[];
+  subItems: SubItem[];
   measurements: Measurement[];
   rooms: Room[];
   stores: Store[];
@@ -158,9 +171,10 @@ export type DbSnapshot = {
 };
 
 export async function idbGetSnapshot(): Promise<DbSnapshot> {
-  const [items, options, measurements, rooms, stores, metaRaw] = await Promise.all([
+  const [items, options, subItems, measurements, rooms, stores, metaRaw] = await Promise.all([
     idbGetAll<Item>("items"),
     idbGetAll<Option>("options"),
+    idbGetAll<SubItem>("subItems"),
     idbGetAll<Measurement>("measurements"),
     idbGetAll<Room>("rooms"),
     idbGetAll<Store>("stores"),
@@ -168,7 +182,7 @@ export async function idbGetSnapshot(): Promise<DbSnapshot> {
   ]);
   const meta: Record<string, unknown> = {};
   for (const row of metaRaw) meta[row.key] = row.value;
-  return { items, options, measurements, rooms, stores, meta };
+  return { items, options, subItems, measurements, rooms, stores, meta };
 }
 
 export async function idbSetMeta(key: string, value: unknown): Promise<void> {

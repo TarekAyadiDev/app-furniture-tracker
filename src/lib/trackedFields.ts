@@ -1,4 +1,4 @@
-import type { DataSource, Item, Measurement, Option, Room, Store } from "@/lib/domain";
+import type { DataSource, Item, Measurement, Option, Room, Store, SubItem } from "@/lib/domain";
 
 export type TrackedFieldSpec<T> = {
   field: string;
@@ -113,6 +113,19 @@ export const OPTION_TRACKED_FIELDS: TrackedFieldSpec<Option>[] = [
   { field: "provenance.sourceRef", get: (o) => o.provenance?.sourceRef, normalize: normalizeOptionalString },
 ];
 
+export const SUB_ITEM_TRACKED_FIELDS: TrackedFieldSpec<SubItem>[] = [
+  { field: "optionId", get: (s) => s.optionId, normalize: normalizeString },
+  { field: "title", get: (s) => s.title, normalize: normalizeString },
+  { field: "sort", get: (s) => s.sort, normalize: normalizeOptionalNumber },
+  { field: "price", get: (s) => s.price, normalize: normalizeOptionalNumber },
+  { field: "taxEstimate", get: (s) => s.taxEstimate, normalize: normalizeOptionalNumber },
+  { field: "discountValue", get: (s) => s.discountValue, normalize: normalizeOptionalNumber },
+  { field: "extraWarrantyCost", get: (s) => s.extraWarrantyCost, normalize: normalizeOptionalNumber },
+  { field: "notes", get: (s) => s.notes, normalize: normalizeOptionalString },
+  { field: "provenance.dataSource", get: (s) => s.provenance?.dataSource, normalize: normalizeDataSource },
+  { field: "provenance.sourceRef", get: (s) => s.provenance?.sourceRef, normalize: normalizeOptionalString },
+];
+
 export const ROOM_TRACKED_FIELDS: TrackedFieldSpec<Room>[] = [
   { field: "name", get: (r) => r.name, normalize: normalizeString },
   { field: "sort", get: (r) => r.sort, normalize: normalizeOptionalNumber },
@@ -129,6 +142,8 @@ export const STORE_TRACKED_FIELDS: TrackedFieldSpec<Store>[] = [
   { field: "shippingCost", get: (s) => s.shippingCost, normalize: normalizeOptionalNumber },
   { field: "deliveryInfo", get: (s) => s.deliveryInfo, normalize: normalizeOptionalString },
   { field: "extraWarranty", get: (s) => s.extraWarranty, normalize: normalizeOptionalString },
+  { field: "extraWarrantyCost", get: (s) => s.extraWarrantyCost, normalize: normalizeOptionalNumber },
+  { field: "taxCost", get: (s) => s.taxCost, normalize: normalizeOptionalNumber },
   { field: "trial", get: (s) => s.trial, normalize: normalizeOptionalString },
   { field: "apr", get: (s) => s.apr, normalize: normalizeOptionalString },
   { field: "notes", get: (s) => s.notes, normalize: normalizeOptionalString },

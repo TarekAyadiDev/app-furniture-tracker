@@ -1,8 +1,21 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import type { Actor, ExportBundleV1, ExportBundleV2, Item, Measurement, Option, PlannerAttachmentV1, Provenance, Room, RoomId, Store } from "@/lib/domain";
+import type {
+  Actor,
+  ExportBundleV1,
+  ExportBundleV2,
+  Item,
+  Measurement,
+  Option,
+  PlannerAttachmentV1,
+  Provenance,
+  Room,
+  RoomId,
+  Store,
+  SubItem,
+} from "@/lib/domain";
 import { DEFAULT_ROOMS, ITEM_STATUSES } from "@/lib/domain";
 import { formatMoneyUSD, nowMs, parseNumberOrNull } from "@/lib/format";
-import { diffItem, diffMeasurement, diffOption, diffStore } from "@/lib/diff";
+import { diffItem, diffMeasurement, diffOption, diffStore, diffSubItem } from "@/lib/diff";
 import { newId } from "@/lib/id";
 import { sanitizeProvenance } from "@/lib/provenance";
 import { DEFAULT_HOME, makeDefaultRooms } from "@/data/seed";
@@ -61,13 +74,14 @@ type DataContextValue = {
   measurements: Measurement[];
   items: Item[];
   options: Option[];
+  subItems: SubItem[];
   stores: Store[];
   orderedStores: Store[];
   unitPreference: UnitPreference;
   lastSyncAt: number | null;
   lastSyncSummary: SyncSummary | null;
   lastPullAt: number | null;
-  dirtyCounts: { items: number; options: number; measurements: number; rooms: number; stores: number };
+  dirtyCounts: { items: number; options: number; subItems: number; measurements: number; rooms: number; stores: number };
 
   saveHome: (home: HomeMeta) => Promise<void>;
   savePlanner: (planner: PlannerMeta) => Promise<void>;
@@ -78,6 +92,7 @@ type DataContextValue = {
   reorderItems: (roomId: RoomId, orderedItemIds: string[]) => Promise<void>;
   reorderMeasurements: (roomId: RoomId, orderedMeasurementIds: string[]) => Promise<void>;
   reorderOptions: (itemId: string, orderedOptionIds: string[]) => Promise<void>;
+  reorderSubItems: (optionId: string, orderedSubItemIds: string[]) => Promise<void>;
   renameCategory: (oldName: string, newName: string) => Promise<void>;
 
   createRoom: (name: string) => Promise<RoomId | null>;
@@ -96,6 +111,10 @@ type DataContextValue = {
     parentItemId: string,
     opts: { sortKey: OptionSortKey; sortDir: OptionSortDir; minPrice?: number | null; maxPrice?: number | null },
   ) => Option[];
+
+  createSubItem: (partial: Partial<SubItem> & { optionId: string }) => Promise<string>;
+  updateSubItem: (id: string, patch: Partial<SubItem>) => Promise<void>;
+  deleteSubItem: (id: string) => Promise<void>;
 
   createMeasurement: (partial: Partial<Measurement> & { room: RoomId }) => Promise<string>;
   updateMeasurement: (id: string, patch: Partial<Measurement>) => Promise<void>;
@@ -282,7 +301,7 @@ function attachmentParentKey(parentType: "item" | "option", parentId: string) {
   return `${parentType}:${parentId}`;
 }
 
-async function replaceAttachmentsForParent(parentType: "item" | "option", parentId: string, metas: AttachmentMeta[]) {
+async function replaceAttachmentsForParent(parentType: "item" | "option" | "subItem", parentId: string, metas: AttachmentMeta[]) {
   const existing = await idbGetAllByIndex<AttachmentRecord>("attachments", "parentKey", attachmentParentKey(parentType, parentId));
   const nextIds = new Set(metas.map((m) => m.id));
   for (const att of existing) {
@@ -408,6 +427,8 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
             shippingCost: coerceNumberOrNull((s as any)?.shippingCost),
             deliveryInfo: typeof (s as any)?.deliveryInfo === "string" ? (s as any).deliveryInfo : null,
             extraWarranty: typeof (s as any)?.extraWarranty === "string" ? (s as any).extraWarranty : null,
+            extraWarrantyCost: coerceNumberOrNull((s as any)?.extraWarrantyCost),
+            taxCost: coerceNumberOrNull((s as any)?.taxCost),
             trial: typeof (s as any)?.trial === "string" ? (s as any).trial : null,
             apr: typeof (s as any)?.apr === "string" ? (s as any).apr : null,
             notes: typeof (s as any)?.notes === "string" ? (s as any).notes : null,
@@ -492,6 +513,61 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         })
       : [];
 
+    const optionsByItem = new Map<string, Option[]>();
+    for (const opt of options) {
+      if (!optionsByItem.has(opt.itemId)) optionsByItem.set(opt.itemId, []);
+      optionsByItem.get(opt.itemId)!.push(opt);
+    }
+    for (const list of optionsByItem.values()) {
+      list.sort((a, b) => {
+        const sa = typeof a.sort === "number" ? a.sort : 999999;
+        const sb = typeof b.sort === "number" ? b.sort : 999999;
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      });
+    }
+
+    const subItems: SubItem[] = Array.isArray((obj as any).subItems)
+      ? ((obj as any).subItems as unknown[]).map((raw) => {
+          const sid = typeof (raw as any)?.id === "string" ? (raw as any).id : newId("si");
+          const createdAt = coerceNumberOrNull((raw as any)?.createdAt) ?? nowMs();
+          const updatedAt = coerceNumberOrNull((raw as any)?.updatedAt) ?? createdAt;
+          const explicitOptionId = typeof (raw as any)?.optionId === "string" ? (raw as any).optionId.trim() : "";
+          let optionId = explicitOptionId;
+          if (!optionId) {
+            const legacyItemId = typeof (raw as any)?.itemId === "string" ? (raw as any).itemId.trim() : "";
+            if (legacyItemId) {
+              const item = items.find((it) => it.id === legacyItemId) || null;
+              const candidates = optionsByItem.get(legacyItemId) || [];
+              if (item?.selectedOptionId && candidates.some((c) => c.id === item.selectedOptionId)) {
+                optionId = item.selectedOptionId;
+              } else {
+                const selected = candidates.filter((c) => c.selected);
+                if (selected.length === 1) optionId = selected[0].id;
+                else if (candidates.length === 1) optionId = candidates[0].id;
+                else if (candidates.length) optionId = candidates[0].id;
+              }
+            }
+          }
+          return {
+            id: sid,
+            optionId,
+            title: String((raw as any)?.title || "").trim() || "Sub-item",
+            sort: coerceSort((raw as any)?.sort),
+            price: coerceNumberOrNull((raw as any)?.price),
+            taxEstimate: coerceNumberOrNull((raw as any)?.taxEstimate),
+            discountValue: coerceNumberOrNull((raw as any)?.discountValue),
+            extraWarrantyCost: coerceNumberOrNull((raw as any)?.extraWarrantyCost),
+            notes: typeof (raw as any)?.notes === "string" ? (raw as any).notes : null,
+            createdAt,
+            updatedAt,
+            remoteId: typeof (raw as any)?.remoteId === "string" ? (raw as any).remoteId : undefined,
+            syncState: typeof (raw as any)?.syncState === "string" ? (raw as any).syncState : undefined,
+            provenance: sanitizeProvenance((raw as any)?.provenance),
+          };
+        })
+      : [];
+
     if (version === 2) {
       const meta: ExportBundleV2["exportMeta"] = {
         exportedAt: exportMeta?.exportedAt ?? nowMs(),
@@ -500,10 +576,10 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         schemaVersion: 2,
         sessionId: exportMeta?.sessionId,
       };
-      return { version: 2, exportedAt, exportMeta: meta, home, planner, rooms, measurements, items, options, stores };
+      return { version: 2, exportedAt, exportMeta: meta, home, planner, rooms, measurements, items, options, subItems, stores };
     }
 
-    return { version: 1, exportedAt, exportMeta, home, planner, rooms, measurements, items, options, stores };
+    return { version: 1, exportedAt, exportMeta, home, planner, rooms, measurements, items, options, subItems, stores };
   }
 
   // Legacy single-file tracker import format (Town Hollywood JSON seed)
@@ -695,6 +771,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [options, setOptions] = useState<Option[]>([]);
+  const [subItems, setSubItems] = useState<SubItem[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [unitPreference, setUnitPreferenceState] = useState<UnitPreference>("in");
   const [lastSyncAt, setLastSyncAt] = useState<number | null>(null);
@@ -743,6 +820,49 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const syncSummary = sanitizeSyncSummary(snap.meta.lastSyncSummary);
     const pullAt = typeof snap.meta.lastPullAt === "number" ? snap.meta.lastPullAt : null;
 
+    const optionsByItem = new Map<string, Option[]>();
+    for (const opt of snap.options) {
+      if (!optionsByItem.has(opt.itemId)) optionsByItem.set(opt.itemId, []);
+      optionsByItem.get(opt.itemId)!.push(opt);
+    }
+    for (const list of optionsByItem.values()) {
+      list.sort((a, b) => {
+        const sa = typeof a.sort === "number" ? a.sort : 999999;
+        const sb = typeof b.sort === "number" ? b.sort : 999999;
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      });
+    }
+
+    let migratedSubItems = snap.subItems;
+    let didMigrateSubItems = false;
+    if (snap.subItems.some((s) => !(s as any)?.optionId)) {
+      const itemById = new Map(snap.items.map((it) => [it.id, it]));
+      migratedSubItems = snap.subItems.map((s) => {
+        const existingOptionId = typeof (s as any)?.optionId === "string" ? (s as any).optionId : "";
+        if (existingOptionId) return s as SubItem;
+        const legacyItemId = typeof (s as any)?.itemId === "string" ? (s as any).itemId : "";
+        if (!legacyItemId) return s as SubItem;
+        const item = itemById.get(legacyItemId) || null;
+        const candidates = optionsByItem.get(legacyItemId) || [];
+        let optionId = "";
+        if (item?.selectedOptionId && candidates.some((c) => c.id === item.selectedOptionId)) {
+          optionId = item.selectedOptionId;
+        } else {
+          const selected = candidates.filter((c) => c.selected);
+          if (selected.length === 1) optionId = selected[0].id;
+          else if (candidates.length === 1) optionId = candidates[0].id;
+          else if (candidates.length) optionId = candidates[0].id;
+        }
+        if (!optionId) return s as SubItem;
+        didMigrateSubItems = true;
+        return { ...s, optionId, updatedAt: nowMs(), syncState: s.syncState ?? "dirty" } as SubItem;
+      });
+      if (didMigrateSubItems) {
+        await idbBulkPut("subItems", migratedSubItems as SubItem[]);
+      }
+    }
+
     const nextStores = snap.stores.slice();
     const storeByKey = new Map<string, Store>();
     for (const s of nextStores) {
@@ -768,6 +888,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         shippingCost: null,
         deliveryInfo: null,
         extraWarranty: null,
+        extraWarrantyCost: null,
+        taxCost: null,
         trial: null,
         apr: null,
         notes: null,
@@ -797,6 +919,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setMeasurements(snap.measurements);
     setItems(snap.items);
     setOptions(snap.options);
+    setSubItems(migratedSubItems as SubItem[]);
     setStores(nextStores);
     setUnitPreferenceState(unitPref);
     setLastSyncAt(syncAt);
@@ -973,10 +1096,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   async function promoteOptionToItem(parent: Item, opt: Option, sortBase: number | null, sortOffset: number, ts: number) {
     const nextSort = typeof sortBase === "number" ? sortBase + sortOffset : null;
-    const itemDiscountType = opt.discountType ?? (typeof opt.discount === "number" ? "amount" : null);
-    const itemDiscountValue =
-      typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null;
     const newItemId = newId("i");
+    const newOptionId = newId("o");
     const nextItem: Item = {
       id: newItemId,
       remoteId: null,
@@ -985,14 +1106,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       room: parent.room,
       category: parent.category,
       status: parent.status,
-      selectedOptionId: null,
+      selectedOptionId: newOptionId,
       sort: nextSort,
-      price: typeof opt.price === "number" ? opt.price : null,
-      discountType: itemDiscountType,
-      discountValue: itemDiscountValue,
+      price: null,
+      discountType: null,
+      discountValue: null,
       qty: 1,
-      store: opt.store ?? null,
-      link: opt.link ?? null,
+      store: null,
+      link: null,
       notes: buildItemNotesFromOption(opt),
       priority: opt.priority ?? null,
       tags: coerceTags(opt.tags),
@@ -1002,10 +1123,48 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       createdAt: ts,
       updatedAt: ts,
     };
+    const nextOption: Option = {
+      id: newOptionId,
+      remoteId: null,
+      syncState: "dirty",
+      itemId: newItemId,
+      title: opt.title || "Option",
+      sort: 0,
+      store: opt.store ?? null,
+      link: opt.link ?? null,
+      promoCode: opt.promoCode ?? null,
+      price: typeof opt.price === "number" ? opt.price : null,
+      shipping: typeof opt.shipping === "number" ? opt.shipping : null,
+      taxEstimate: typeof opt.taxEstimate === "number" ? opt.taxEstimate : null,
+      discount: typeof opt.discount === "number" ? opt.discount : null,
+      discountType: opt.discountType ?? (typeof opt.discount === "number" ? "amount" : null),
+      discountValue:
+        typeof opt.discountValue === "number" ? opt.discountValue : typeof opt.discount === "number" ? opt.discount : null,
+      dimensionsText: opt.dimensionsText ?? null,
+      dimensions: opt.dimensions ? { ...opt.dimensions } : undefined,
+      specs: opt.specs ? { ...opt.specs } : null,
+      notes: opt.notes ?? null,
+      priority: opt.priority ?? null,
+      tags: coerceTags(opt.tags),
+      selected: true,
+      sourceItemId: opt.sourceItemId,
+      provenance: makeHumanCreatedProvenance(opt.provenance, ts),
+      createdAt: ts,
+      updatedAt: ts,
+    };
     await idbPut("items", nextItem);
+    await idbPut("options", nextOption);
     await idbPut("options", { ...opt, syncState: "deleted", updatedAt: ts });
+    const allSubItems = await idbGetAll<SubItem>("subItems");
+    const related = allSubItems.filter((s) => s.syncState !== "deleted" && s.optionId === opt.id);
+    if (related.length) {
+      await idbBulkPut(
+        "subItems",
+        related.map((s) => ({ ...s, optionId: newOptionId, updatedAt: ts, syncState: "dirty" })),
+      );
+    }
     try {
-      await moveAttachmentsParent("option", opt.id, "item", newItemId);
+      await moveAttachmentsParent("option", opt.id, "option", newOptionId);
     } catch {
       // Ignore attachment move failures; option deletion will still proceed.
     }
@@ -1176,6 +1335,35 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, []);
 
+  const createSubItem = useCallback(async (partial: Partial<SubItem> & { optionId: string }) => {
+    const ts = nowMs();
+    const allExisting = await idbGetAll<SubItem>("subItems");
+    const minSort = allExisting
+      .filter((s) => s.syncState !== "deleted" && s.optionId === partial.optionId && typeof s.sort === "number")
+      .reduce((min, s) => Math.min(min, s.sort as number), 0);
+    const sort = minSort - 1;
+    const id = newId("si");
+    const sub: SubItem = {
+      id,
+      remoteId: null,
+      syncState: "dirty",
+      optionId: partial.optionId,
+      title: (partial.title || "").toString().trim() || "Sub-item",
+      sort,
+      price: typeof partial.price === "number" ? partial.price : null,
+      taxEstimate: typeof partial.taxEstimate === "number" ? partial.taxEstimate : null,
+      discountValue: typeof partial.discountValue === "number" ? partial.discountValue : null,
+      extraWarrantyCost: typeof partial.extraWarrantyCost === "number" ? partial.extraWarrantyCost : null,
+      notes: typeof partial.notes === "string" ? partial.notes : null,
+      provenance: makeHumanCreatedProvenance(partial.provenance, ts),
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    await idbPut("subItems", sub);
+    notifyDbChanged();
+    return id;
+  }, []);
+
   const updateOption = useCallback<UpdateOptionFn>(async (arg1: string, arg2: Partial<Option> | string, arg3?: Partial<Option>) => {
     const optionId = typeof arg3 === "undefined" ? arg1 : (arg2 as string);
     const parentItemId = typeof arg3 === "undefined" ? null : arg1;
@@ -1213,11 +1401,51 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     notifyDbChanged();
   }, []);
 
+  const updateSubItem = useCallback(async (id: string, patch: Partial<SubItem>) => {
+    const all = await idbGetAll<SubItem>("subItems");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    const ts = nowMs();
+    const next: SubItem = {
+      ...cur,
+      ...patch,
+      title: typeof patch.title === "string" ? patch.title : cur.title,
+      price: typeof patch.price === "undefined" ? cur.price ?? null : coerceNumberOrNull(patch.price),
+      taxEstimate: typeof patch.taxEstimate === "undefined" ? cur.taxEstimate ?? null : coerceNumberOrNull(patch.taxEstimate),
+      discountValue: typeof patch.discountValue === "undefined" ? cur.discountValue ?? null : coerceNumberOrNull(patch.discountValue),
+      extraWarrantyCost:
+        typeof patch.extraWarrantyCost === "undefined" ? cur.extraWarrantyCost ?? null : coerceNumberOrNull(patch.extraWarrantyCost),
+      notes: typeof patch.notes === "undefined" ? cur.notes ?? null : typeof patch.notes === "string" ? patch.notes : null,
+      updatedAt: ts,
+      syncState: patch.syncState ?? "dirty",
+      provenance: touchProvenanceForHumanEdit(cur.provenance, patch.provenance, ts),
+    };
+    await idbPut("subItems", next);
+    notifyDbChanged();
+  }, []);
+
   const deleteOption = useCallback(async (id: string) => {
     const all = await idbGetAll<Option>("options");
     const cur = all.find((x) => x.id === id);
     if (!cur) return;
-    await idbPut("options", { ...cur, syncState: "deleted", updatedAt: nowMs() });
+    const ts = nowMs();
+    await idbPut("options", { ...cur, syncState: "deleted", updatedAt: ts });
+    const subs = await idbGetAll<SubItem>("subItems");
+    const toDelete = subs.filter((s) => s.syncState !== "deleted" && s.optionId === id);
+    if (toDelete.length) {
+      await idbBulkPut(
+        "subItems",
+        toDelete.map((s) => ({ ...s, syncState: "deleted", updatedAt: ts })),
+      );
+    }
+    notifyDbChanged();
+  }, []);
+
+  const deleteSubItem = useCallback(async (id: string) => {
+    const all = await idbGetAll<SubItem>("subItems");
+    const cur = all.find((x) => x.id === id);
+    if (!cur) return;
+    await idbPut("subItems", { ...cur, syncState: "deleted", updatedAt: nowMs() });
     notifyDbChanged();
   }, []);
 
@@ -1313,19 +1541,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (existing) return existing.id;
     const ts = nowMs();
     const sort = allStores.filter((s) => s.syncState !== "deleted").length;
-    const store: Store = {
-      id: newId("s"),
-      name,
-      sort,
-      discountType: null,
-      discountValue: null,
-      shippingCost: null,
-      deliveryInfo: null,
-      extraWarranty: null,
-      trial: null,
-      apr: null,
-      notes: null,
-      remoteId: null,
+      const store: Store = {
+        id: newId("s"),
+        name,
+        sort,
+        discountType: null,
+        discountValue: null,
+        shippingCost: null,
+        deliveryInfo: null,
+        extraWarranty: null,
+        extraWarrantyCost: null,
+        taxCost: null,
+        trial: null,
+        apr: null,
+        notes: null,
+        remoteId: null,
       syncState: "dirty",
       provenance: makeHumanCreatedProvenance(undefined, ts),
       createdAt: ts,
@@ -1380,6 +1610,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         typeof patch.deliveryInfo === "undefined" ? cur.deliveryInfo ?? null : typeof patch.deliveryInfo === "string" ? patch.deliveryInfo : null,
       extraWarranty:
         typeof patch.extraWarranty === "undefined" ? cur.extraWarranty ?? null : typeof patch.extraWarranty === "string" ? patch.extraWarranty : null,
+      extraWarrantyCost:
+        typeof patch.extraWarrantyCost === "undefined" ? cur.extraWarrantyCost ?? null : coerceNumberOrNull(patch.extraWarrantyCost),
+      taxCost: typeof patch.taxCost === "undefined" ? cur.taxCost ?? null : coerceNumberOrNull(patch.taxCost),
       trial: typeof patch.trial === "undefined" ? cur.trial ?? null : typeof patch.trial === "string" ? patch.trial : null,
       apr: typeof patch.apr === "undefined" ? cur.apr ?? null : typeof patch.apr === "string" ? patch.apr : null,
       notes: typeof patch.notes === "undefined" ? cur.notes ?? null : typeof patch.notes === "string" ? patch.notes : null,
@@ -1552,14 +1785,73 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     notifyDbChanged();
   }, []);
 
+  const reorderSubItems = useCallback(async (optionId: string, orderedSubItemIds: string[]) => {
+    const all = await idbGetAll<SubItem>("subItems");
+    const forOption = all.filter((s) => s.syncState !== "deleted" && s.optionId === optionId);
+    const byId = new Map(forOption.map((s) => [s.id, s]));
+
+    function rank(s: SubItem) {
+      return typeof s.sort === "number" ? s.sort : 999999;
+    }
+
+    const currentIds = [...forOption]
+      .sort((a, b) => {
+        const sa = rank(a);
+        const sb = rank(b);
+        if (sa !== sb) return sa - sb;
+        return b.updatedAt - a.updatedAt;
+      })
+      .map((s) => s.id);
+
+    const ordered = orderedSubItemIds.filter((id) => byId.has(id));
+    const remaining = currentIds.filter((id) => !ordered.includes(id));
+    const finalIds = [...ordered, ...remaining];
+
+    const ts = nowMs();
+    const updates: SubItem[] = finalIds.map((id, idx) => {
+      const cur = byId.get(id)!;
+      return { ...cur, sort: idx, updatedAt: ts, syncState: "dirty" };
+    });
+    await idbBulkPut("subItems", updates);
+    notifyDbChanged();
+  }, []);
+
   const sortAndFilterOptions = useCallback(
     (parentItemId: string, opts: { sortKey: OptionSortKey; sortDir: OptionSortDir; minPrice?: number | null; maxPrice?: number | null }) => {
       const min = typeof opts.minPrice === "number" ? opts.minPrice : null;
       const max = typeof opts.maxPrice === "number" ? opts.maxPrice : null;
+      const optionSubItems = new Map<string, SubItem[]>();
+      for (const s of subItems) {
+        if (s.syncState === "deleted") continue;
+        const key = s.optionId;
+        if (!key) continue;
+        if (!optionSubItems.has(key)) optionSubItems.set(key, []);
+        optionSubItems.get(key)!.push(s);
+      }
+      const optionTotalWithSubs = (opt: Option): number | null => {
+        const subs = optionSubItems.get(opt.id) || [];
+        if (subs.length) {
+          let total = 0;
+          let hasAny = false;
+          for (const sub of subs) {
+            const price = typeof sub.price === "number" ? sub.price : null;
+            const tax = typeof sub.taxEstimate === "number" ? sub.taxEstimate : null;
+            const warranty = typeof sub.extraWarrantyCost === "number" ? sub.extraWarrantyCost : null;
+            const hasSub = price !== null || tax !== null || warranty !== null;
+            if (!hasSub) continue;
+            const base = (price || 0) + (tax || 0) + (warranty || 0);
+            const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
+            total += Math.max(0, base - discount);
+            hasAny = true;
+          }
+          return hasAny ? total : null;
+        }
+        return optionTotalWithoutStore(opt);
+      };
       const base = options.filter((o) => o.syncState !== "deleted" && o.itemId === parentItemId);
       const filtered = base.filter((o) => {
         if (min === null && max === null) return true;
-        const total = optionTotalWithoutStore(o);
+        const total = optionTotalWithSubs(o);
         if (total === null) return false;
         if (min !== null && total < min) return false;
         if (max !== null && total > max) return false;
@@ -1577,8 +1869,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           const pb = typeof b.priority === "number" ? b.priority : 999999;
           if (pa !== pb) return (pa - pb) * dir;
         } else {
-          const ta = optionTotalWithoutStore(a);
-          const tb = optionTotalWithoutStore(b);
+          const ta = optionTotalWithSubs(a);
+          const tb = optionTotalWithSubs(b);
           if (ta === null && tb !== null) return 1;
           if (tb === null && ta !== null) return -1;
           if (ta !== null && tb !== null && ta !== tb) return (ta - tb) * dir;
@@ -1591,7 +1883,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
       return sorted;
     },
-    [options, storeByName],
+    [options, storeByName, subItems],
   );
 
   const renameCategory = useCallback(async (oldName: string, newName: string) => {
@@ -1647,6 +1939,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const includeDeleted = Boolean(opts?.includeDeleted);
       const itemsBase = includeDeleted ? snap.items : snap.items.filter((i) => i.syncState !== "deleted");
       const optsBase = includeDeleted ? snap.options : snap.options.filter((o) => o.syncState !== "deleted");
+      const subItemsBase = includeDeleted ? snap.subItems : snap.subItems.filter((s) => s.syncState !== "deleted");
       const itemsOut = itemsBase.map((it) => ({
         ...it,
         attachments: attachmentByParentKey.get(`item:${it.id}`) || [],
@@ -1654,6 +1947,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const optsOut = optsBase.map((o) => ({
         ...o,
         attachments: attachmentByParentKey.get(`option:${o.id}`) || [],
+      })) as any[];
+      const subItemsOut = subItemsBase.map((s) => ({
+        ...s,
+        attachments: attachmentByParentKey.get(`subItem:${s.id}`) || [],
       })) as any[];
       const measOut = includeDeleted ? snap.measurements : snap.measurements.filter((m) => m.syncState !== "deleted");
       const roomsOut = includeDeleted ? snap.rooms : snap.rooms.filter((r) => r.syncState !== "deleted");
@@ -1676,6 +1973,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         measurements: measOut,
         items: itemsOut,
         options: optsOut,
+        subItems: subItemsOut,
         stores: storesOut,
       };
       return bundle;
@@ -1697,7 +1995,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
     const detectedAi =
       normalized.exportMeta?.exportedBy === "ai" ||
-      [...normalized.items, ...normalized.options, ...normalized.measurements].some(
+      [...normalized.items, ...normalized.options, ...normalized.subItems, ...normalized.measurements].some(
         (e) => e.provenance?.createdBy === "ai" || e.provenance?.lastEditedBy === "ai",
       );
     const aiAssisted = Boolean(opts?.aiAssisted) || detectedAi;
@@ -1897,6 +2195,34 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
     if (optsToPut.length) await idbBulkPut("options", optsToPut);
 
+    const existingSubItemsById = new Map((existingSnap?.subItems || []).map((s) => [s.id, s] as const));
+    const subItemsToPut: SubItem[] = [];
+    for (const incoming of normalized.subItems || []) {
+      const existing = existingSubItemsById.get(incoming.id);
+      if (!existing) {
+        subItemsToPut.push({
+          ...incoming,
+          syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+          remoteId: typeof incoming.remoteId === "undefined" ? null : incoming.remoteId,
+          updatedAt: importedAt,
+          provenance: buildNewProvenance(incoming.provenance),
+        });
+        continue;
+      }
+      const changes = diffSubItem(existing, incoming);
+      if (!changes.length) continue;
+      subItemsToPut.push({
+        ...existing,
+        ...incoming,
+        createdAt: existing.createdAt,
+        remoteId: typeof existing.remoteId === "undefined" ? incoming.remoteId : existing.remoteId,
+        syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
+        updatedAt: importedAt,
+        provenance: buildChangedProvenance(existing.provenance, incoming.provenance, changes),
+      });
+    }
+    if (subItemsToPut.length) await idbBulkPut("subItems", subItemsToPut);
+
     const rawItems = Array.isArray((bundle as any)?.items) ? ((bundle as any).items as any[]) : [];
     for (const raw of rawItems) {
       const id = typeof raw?.id === "string" ? raw.id : "";
@@ -1915,6 +2241,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       if (!Array.isArray(atts)) continue;
       const metas = atts.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
       await replaceAttachmentsForParent("option", id, metas);
+    }
+
+    const rawSubItems = Array.isArray((bundle as any)?.subItems) ? ((bundle as any).subItems as any[]) : [];
+    for (const raw of rawSubItems) {
+      const id = typeof raw?.id === "string" ? raw.id : "";
+      if (!id) continue;
+      const atts = raw?.attachments;
+      if (!Array.isArray(atts)) continue;
+      const metas = atts.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
+      await replaceAttachmentsForParent("subItem", id, metas);
     }
 
     notifyDbChanged();
@@ -1937,11 +2273,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     () => ({
       items: items.filter((i) => i.syncState !== "clean").length,
       options: options.filter((o) => o.syncState !== "clean").length,
+      subItems: subItems.filter((s) => s.syncState !== "clean").length,
       measurements: measurements.filter((m) => m.syncState !== "clean").length,
       rooms: rooms.filter((r) => r.syncState !== "clean").length,
       stores: stores.filter((s) => s.syncState !== "clean").length,
     }),
-    [items, measurements, options, rooms, stores],
+    [items, measurements, options, subItems, rooms, stores],
   );
 
   const value = useMemo<DataContextValue>(
@@ -1955,6 +2292,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       measurements,
       items,
       options,
+      subItems,
       stores,
       orderedStores,
       unitPreference,
@@ -1970,6 +2308,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       reorderItems,
       reorderMeasurements,
       reorderOptions,
+      reorderSubItems,
       renameCategory,
       createRoom,
       deleteRoom,
@@ -1978,8 +2317,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       deleteItem,
       convertItemToOption,
       createOption,
+      createSubItem,
       updateOption,
+      updateSubItem,
       deleteOption,
+      deleteSubItem,
       convertOptionToItem,
       sortAndFilterOptions,
       createMeasurement,
@@ -2004,6 +2346,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       measurements,
       items,
       options,
+      subItems,
       stores,
       orderedStores,
       unitPreference,
@@ -2019,6 +2362,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       reorderItems,
       reorderMeasurements,
       reorderOptions,
+      reorderSubItems,
       renameCategory,
       createRoom,
       deleteRoom,
@@ -2027,8 +2371,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       deleteItem,
       convertItemToOption,
       createOption,
+      createSubItem,
       updateOption,
+      updateSubItem,
       deleteOption,
+      deleteSubItem,
       convertOptionToItem,
       sortAndFilterOptions,
       createMeasurement,

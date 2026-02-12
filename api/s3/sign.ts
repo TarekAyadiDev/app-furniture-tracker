@@ -45,7 +45,7 @@ export default async function handler(req: any, res: any) {
 
     const fileName = sanitizeFilename(fileNameRaw || "photo");
     const ext = extFromName(fileName);
-    const safeParentType = parentTypeRaw === "option" ? "option" : "item";
+    const safeParentType = parentTypeRaw === "option" || parentTypeRaw === "subItem" ? parentTypeRaw : "item";
     const safeParentId = sanitizeFilename(parentIdRaw || "unknown");
 
     const accessKeyId = process.env.AWS_ACCESS_KEY_ID;

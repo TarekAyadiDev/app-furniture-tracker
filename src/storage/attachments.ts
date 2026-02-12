@@ -1,9 +1,9 @@
 import { nowMs } from "@/lib/format";
 import { newId } from "@/lib/id";
-import type { Item, Option } from "@/lib/domain";
+import type { Item, Option, SubItem } from "@/lib/domain";
 import { idbDelete, idbGet, idbGetAllByIndex, idbPut } from "@/storage/idb";
 
-export type AttachmentParentType = "item" | "option";
+export type AttachmentParentType = "item" | "option" | "subItem";
 
 export type AttachmentRecord = {
   id: string;
@@ -31,9 +31,15 @@ async function touchParent(parentType: AttachmentParentType, parentId: string) {
     await idbPut("items", { ...cur, updatedAt: ts, syncState: "dirty" });
     return;
   }
-  const cur = await idbGet<Option>("options", parentId);
+  if (parentType === "option") {
+    const cur = await idbGet<Option>("options", parentId);
+    if (!cur) return;
+    await idbPut("options", { ...cur, updatedAt: ts, syncState: "dirty" });
+    return;
+  }
+  const cur = await idbGet<SubItem>("subItems", parentId);
   if (!cur) return;
-  await idbPut("options", { ...cur, updatedAt: ts, syncState: "dirty" });
+  await idbPut("subItems", { ...cur, updatedAt: ts, syncState: "dirty" });
 }
 
 type SignedUpload = { uploadUrl: string; publicUrl: string; key: string };

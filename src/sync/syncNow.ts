@@ -1,4 +1,4 @@
-import type { ExportBundleV1, Item, Measurement, Option, Room, Store } from "@/lib/domain";
+import type { ExportBundleV1, Item, Measurement, Option, Room, Store, SubItem } from "@/lib/domain";
 import { newId } from "@/lib/id";
 import { idbDelete, idbGet, idbGetAll, idbGetAllByIndex, idbGetSnapshot, idbPut, idbSetMeta } from "@/storage/idb";
 import { notifyDbChanged } from "@/storage/notify";
@@ -35,7 +35,7 @@ function isRecordId(id: string) {
   return id.startsWith("rec");
 }
 
-function attachmentParentKey(parentType: "item" | "option", parentId: string) {
+function attachmentParentKey(parentType: "item" | "option" | "subItem", parentId: string) {
   return `${parentType}:${parentId}`;
 }
 
@@ -55,7 +55,7 @@ function parseAttachmentMeta(raw: any): AttachmentMeta | null {
 }
 
 async function replaceAttachmentsForParent(
-  parentType: "item" | "option",
+  parentType: "item" | "option" | "subItem",
   parentId: string,
   metas: AttachmentMeta[],
 ) {
@@ -124,6 +124,12 @@ async function rekeyOption(localId: string, remoteId: string) {
   const next: Option = { ...opt, id: remoteId, remoteId, syncState: "clean" };
   await idbPut("options", next);
   await idbDelete("options", localId);
+  const snap = await idbGetSnapshot();
+  for (const s of snap.subItems) {
+    if (s.optionId === localId) {
+      await idbPut("subItems", { ...s, optionId: remoteId, syncState: s.syncState || "dirty" });
+    }
+  }
   await rekeyAttachmentParent("option", localId, remoteId);
 }
 
@@ -175,6 +181,15 @@ async function applyPulledBundle(bundle: ExportBundleV1) {
     await idbPut("options", opt);
     const metas = attachments.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
     await replaceAttachmentsForParent("option", opt.id, metas);
+  }
+  for (const s of (bundle as any).subItems || []) {
+    const anySub = s as any;
+    const attachments = Array.isArray(anySub.attachments) ? anySub.attachments : [];
+    const { attachments: _ignoredSubAttachments, ...subRest } = anySub;
+    const sub: SubItem = { ...subRest, syncState: "clean", remoteId: anySub.remoteId || anySub.id || null };
+    await idbPut("subItems", sub);
+    const metas = attachments.map(parseAttachmentMeta).filter(Boolean) as AttachmentMeta[];
+    await replaceAttachmentsForParent("subItem", sub.id, metas);
   }
 }
 
