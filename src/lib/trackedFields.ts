@@ -1,4 +1,4 @@
-import type { DataSource, Item, Measurement, Option, Room, Store, SubItem } from "@/lib/domain";
+import { normalizeItemKind, type DataSource, type Item, type Measurement, type Option, type Room, type Store, type SubItem } from "@/lib/domain";
 
 export type TrackedFieldSpec<T> = {
   field: string;
@@ -68,6 +68,7 @@ export const ITEM_TRACKED_FIELDS: TrackedFieldSpec<Item>[] = [
   { field: "room", get: (i) => i.room, normalize: normalizeString },
   { field: "category", get: (i) => i.category, normalize: normalizeString },
   { field: "status", get: (i) => i.status, normalize: normalizeString },
+  { field: "kind", get: (i) => i.kind, normalize: normalizeItemKind },
   { field: "selectedOptionId", get: (i) => i.selectedOptionId, normalize: normalizeOptionalString },
   { field: "sort", get: (i) => i.sort, normalize: normalizeOptionalNumber },
   { field: "price", get: (i) => i.price, normalize: normalizeOptionalNumber },
@@ -117,8 +118,10 @@ export const SUB_ITEM_TRACKED_FIELDS: TrackedFieldSpec<SubItem>[] = [
   { field: "optionId", get: (s) => s.optionId, normalize: normalizeString },
   { field: "title", get: (s) => s.title, normalize: normalizeString },
   { field: "sort", get: (s) => s.sort, normalize: normalizeOptionalNumber },
+  { field: "qty", get: (s) => s.qty, normalize: normalizeOptionalNumber },
   { field: "price", get: (s) => s.price, normalize: normalizeOptionalNumber },
   { field: "taxEstimate", get: (s) => s.taxEstimate, normalize: normalizeOptionalNumber },
+  { field: "discountType", get: (s) => s.discountType, normalize: normalizeOptionalString },
   { field: "discountValue", get: (s) => s.discountValue, normalize: normalizeOptionalNumber },
   { field: "extraWarrantyCost", get: (s) => s.extraWarrantyCost, normalize: normalizeOptionalNumber },
   { field: "notes", get: (s) => s.notes, normalize: normalizeOptionalString },

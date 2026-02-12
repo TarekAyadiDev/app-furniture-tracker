@@ -10,7 +10,7 @@ import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, type Item, type ItemStatus, type Option, type RoomId } from "@/lib/domain";
+import { ITEM_STATUSES, inferItemKind, type Item, type ItemStatus, type Option, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import {
   buildStoreIndex,
@@ -68,6 +68,21 @@ function optionDiscountLabel(opt: Option): string | null {
   return `disc -${formatMoneyUSD(value)}`;
 }
 
+function subItemDiscountAmount(sub: { discountType?: "amount" | "percent" | null; discountValue?: number | null }, base: number): number {
+  const value = typeof sub.discountValue === "number" ? sub.discountValue : null;
+  if (value === null || value <= 0) return 0;
+  if (sub.discountType === "percent") {
+    if (value >= 100) return base;
+    return (base * value) / 100;
+  }
+  return Math.min(value, base);
+}
+
+function subItemQty(sub: { qty?: number }): number {
+  const raw = typeof sub.qty === "number" ? sub.qty : null;
+  return raw !== null && raw > 0 ? Math.round(raw) : 1;
+}
+
 function pickSelectedOptions(item: Item, list: Option[]): Option[] {
   const marked = list.filter((o) => o.selected);
   if (marked.length) return marked;
@@ -93,6 +108,7 @@ export default function Items() {
     reorderOptions,
     createItem,
     updateItem,
+    convertItemToOption,
     createOption,
     updateOption,
     createSubItem,
@@ -114,9 +130,13 @@ export default function Items() {
   const [openRooms, setOpenRooms] = useState<string[]>(() => initialUi.openRooms);
   const [openItemOptions, setOpenItemOptions] = useState<Record<string, boolean>>(() => initialUi.openItemOptions);
   const [reorderOptionsForItem, setReorderOptionsForItem] = useState<Record<string, boolean>>({});
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+  const [dropTargetItemId, setDropTargetItemId] = useState<string | null>(null);
+  const [dropBusyItemId, setDropBusyItemId] = useState<string | null>(null);
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
   const storeByName = useMemo(() => buildStoreIndex(orderedStores), [orderedStores]);
+  const itemById = useMemo(() => new Map(items.filter((i) => i.syncState !== "deleted").map((i) => [i.id, i])), [items]);
   const itemNameById = useMemo(() => new Map(items.filter((i) => i.syncState !== "deleted").map((i) => [i.id, i.name])), [items]);
 
   function buildCopyName(base: string) {
@@ -148,6 +168,7 @@ export default function Items() {
         room: it.room,
         category: it.category,
         status: it.status,
+        kind: inferItemKind(it, options.some((o) => o.syncState !== "deleted" && o.itemId === it.id)),
         price: it.price ?? null,
         discountType: it.discountType ?? null,
         discountValue: it.discountValue ?? null,
@@ -214,8 +235,10 @@ export default function Items() {
           const newSubId = await createSubItem({
             optionId: newOptId,
             title: sub.title,
+            qty: subItemQty(sub),
             price: sub.price ?? null,
             taxEstimate: sub.taxEstimate ?? null,
+            discountType: sub.discountType ?? null,
             discountValue: sub.discountValue ?? null,
             extraWarrantyCost: sub.extraWarrantyCost ?? null,
             notes: sub.notes ?? null,
@@ -291,6 +314,40 @@ export default function Items() {
     }
   }
 
+  async function onDropItemIntoPlaceholder(placeholderItemId: string, sourceItemId: string) {
+    if (!placeholderItemId || !sourceItemId || placeholderItemId === sourceItemId) return;
+    if (dropBusyItemId) return;
+    const target = itemById.get(placeholderItemId);
+    const source = itemById.get(sourceItemId);
+    if (!target || !source) return;
+
+    const targetOptions = optionsByItem.get(target.id) || [];
+    const sourceOptions = optionsByItem.get(source.id) || [];
+    const targetIsPlaceholder = inferItemKind(target, targetOptions.length > 0) === "placeholder";
+    const sourceIsPlaceholder = inferItemKind(source, sourceOptions.length > 0) === "placeholder";
+    if (!targetIsPlaceholder) {
+      toast({ title: "Drop failed", description: "Variations can only be dropped into placeholder items." });
+      return;
+    }
+    if (sourceIsPlaceholder || sourceOptions.length > 0) {
+      toast({ title: "Drop failed", description: "Only standalone items can be dropped as variations." });
+      return;
+    }
+
+    setDropBusyItemId(placeholderItemId);
+    try {
+      await convertItemToOption(placeholderItemId, sourceItemId);
+      setOpenItemOptions((cur) => ({ ...cur, [placeholderItemId]: true }));
+      toast({ title: "Variation added", description: `${source.name} moved under ${target.name}.` });
+    } catch (err: any) {
+      toast({ title: "Drop failed", description: err?.message || "Could not add this variation." });
+    } finally {
+      setDropBusyItemId(null);
+      setDropTargetItemId(null);
+      setDraggingItemId(null);
+    }
+  }
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -359,8 +416,8 @@ export default function Items() {
           const hasSub = price !== null || tax !== null || warranty !== null;
           if (!hasSub) continue;
           const base = (price || 0) + (tax || 0) + (warranty || 0);
-          const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
-          total += Math.max(0, base - discount);
+          const discount = subItemDiscountAmount(sub, base);
+          total += Math.max(0, base - discount) * subItemQty(sub);
           hasAny = true;
         }
         return hasAny ? total : null;
@@ -618,15 +675,20 @@ export default function Items() {
                         );
                         const appliedItemId = storeSummary?.appliedItemId || null;
                         const appliedName = appliedItemId ? itemNameById.get(appliedItemId) || null : null;
-                        const displayStore = selectedOpt?.store || (!itemOpts.length ? it.store : null);
+                        const isPlaceholder = inferItemKind(it, itemOpts.length > 0) === "placeholder";
+                        const displayStore = selectedOpt?.store || (!isPlaceholder ? it.store : null);
                         const openOptions = Boolean(openItemOptions[it.id]);
                         const openOptReorder = Boolean(reorderOptionsForItem[it.id]);
                         const modifiedFields = Array.isArray(it.provenance?.modifiedFields) ? it.provenance.modifiedFields : [];
+                        const canDragToPlaceholder = !isPlaceholder && !itemOpts.length;
+                        const isDropTarget = dropTargetItemId === it.id;
+                        const dropBusy = dropBusyItemId === it.id;
                         return (
                           <Card
                             key={it.id}
                             className={[
                               "p-3 transition-colors",
+                              isDropTarget ? "border-primary/70 bg-primary/5" : "",
                               selectionLabel ? "border-primary/20 bg-secondary/30" : "",
                             ].join(" ")}
                           >
@@ -650,9 +712,23 @@ export default function Items() {
                                   }}
                                 >
                                   <div className="flex items-center justify-between gap-2">
-                                    <div className="truncate text-base font-semibold">
-                                      {it.name}
-                                      {selectionLabel ? <span className="text-sm font-normal text-muted-foreground"> · {selectionLabel}</span> : null}
+                                    <div className="min-w-0 flex items-center gap-2">
+                                      <div className="truncate text-base font-semibold">
+                                        {it.name}
+                                        {selectionLabel ? (
+                                          <span className="text-sm font-normal text-muted-foreground"> · {selectionLabel}</span>
+                                        ) : null}
+                                      </div>
+                                      <Badge
+                                        variant="outline"
+                                        className={
+                                          isPlaceholder
+                                            ? "border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-amber-900 shadow-sm hover:bg-amber-100"
+                                            : "border border-slate-300/90 bg-gradient-to-r from-slate-100 to-zinc-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-slate-700 shadow-sm hover:from-slate-100 hover:to-zinc-100"
+                                        }
+                                      >
+                                        {isPlaceholder ? "Placeholder" : "Item"}
+                                      </Badge>
                                     </div>
                                     <StatusBadge status={it.status} />
                                   </div>
@@ -712,6 +788,53 @@ export default function Items() {
                                     <ChevronDown className={["h-4 w-4 transition-transform", openOptions ? "rotate-180" : ""].join(" ")} />
                                     {openOptions ? "Hide variations" : `Show variations (${itemOpts.length})`}
                                   </button>
+                                ) : null}
+                                {canDragToPlaceholder ? (
+                                  <button
+                                    type="button"
+                                    draggable
+                                    onDragStart={(e) => {
+                                      setDraggingItemId(it.id);
+                                      e.dataTransfer.effectAllowed = "move";
+                                      e.dataTransfer.setData("text/plain", it.id);
+                                    }}
+                                    onDragEnd={() => {
+                                      setDraggingItemId(null);
+                                      setDropTargetItemId(null);
+                                    }}
+                                    className="mt-2 inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                                  >
+                                    Drag to placeholder
+                                  </button>
+                                ) : null}
+                                {isPlaceholder ? (
+                                  <div
+                                    className={[
+                                      "mt-2 rounded-lg border border-dashed px-3 py-2 text-xs",
+                                      isDropTarget ? "border-primary bg-primary/10 text-foreground" : "text-muted-foreground",
+                                    ].join(" ")}
+                                    onDragOver={(e) => {
+                                      const sourceId = e.dataTransfer.getData("text/plain") || draggingItemId || "";
+                                      if (!sourceId || sourceId === it.id) return;
+                                      e.preventDefault();
+                                      if (dropTargetItemId !== it.id) setDropTargetItemId(it.id);
+                                    }}
+                                    onDragLeave={() => {
+                                      if (dropTargetItemId === it.id) setDropTargetItemId(null);
+                                    }}
+                                    onDrop={(e) => {
+                                      e.preventDefault();
+                                      const sourceId = e.dataTransfer.getData("text/plain") || draggingItemId || "";
+                                      if (!sourceId) return;
+                                      void onDropItemIntoPlaceholder(it.id, sourceId);
+                                    }}
+                                  >
+                                    {dropBusy
+                                      ? "Adding variation..."
+                                      : isDropTarget
+                                        ? "Release to add as variation"
+                                        : "Drop standalone items here to add variations"}
+                                  </div>
                                 ) : null}
                               </div>
 
@@ -777,12 +900,24 @@ export default function Items() {
                                       const total = optionTotalOrNull(opt);
                                       const isSelected = selectedOpt?.id === opt.id || opt.selected;
                                       return (
-                                        <div key={opt.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-border/60 bg-background/70 p-3">
+                                        <div
+                                          key={opt.id}
+                                          className={[
+                                            "flex flex-wrap items-center gap-3 rounded-xl border p-2.5 sm:p-3",
+                                            isSelected
+                                              ? "border-sky-300/90 bg-gradient-to-r from-sky-50/95 to-cyan-50/70 ring-1 ring-sky-200/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+                                              : "border-border/60 bg-background/70",
+                                          ].join(" ")}
+                                        >
                                           <OptionPhotoStrip optionId={opt.id} />
                                           <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-2">
                                               <div className="truncate text-sm font-semibold">{opt.title}</div>
-                                              {isSelected ? <Badge>Selected</Badge> : <Badge variant="secondary">Option</Badge>}
+                                              {isSelected ? (
+                                                <Badge className="border border-sky-300/90 bg-sky-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-sky-900 shadow-sm hover:bg-sky-100">Selected</Badge>
+                                              ) : (
+                                                <Badge variant="secondary">Option</Badge>
+                                              )}
                                             </div>
                                             <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                               {opt.store ? <span>{opt.store}</span> : null}

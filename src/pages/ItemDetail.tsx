@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
-import { ITEM_STATUSES, type DataSource, type Item, type ItemStatus, type Option, type ReviewStatus, type RoomId, type SubItem } from "@/lib/domain";
+import { ITEM_STATUSES, inferItemKind, type DataSource, type Item, type ItemStatus, type Option, type ReviewStatus, type RoomId, type SubItem } from "@/lib/domain";
 import { formatMoneyUSD, nowMs, parseNumberOrNull } from "@/lib/format";
 import { computeItemFitWarnings } from "@/lib/fit";
 import { markProvenanceNeedsReview, markProvenanceVerified } from "@/lib/provenance";
@@ -61,11 +61,49 @@ function subItemPreDiscountTotalOrNull(sub: SubItem): number | null {
   return (price || 0) + (tax || 0) + (warranty || 0);
 }
 
+function subItemDiscountAmount(sub: SubItem, base: number): number {
+  const value = typeof sub.discountValue === "number" ? sub.discountValue : null;
+  if (value === null || value <= 0) return 0;
+  if (sub.discountType === "percent") {
+    if (value >= 100) return base;
+    return (base * value) / 100;
+  }
+  return Math.min(value, base);
+}
+
+function subItemDiscountLabel(sub: SubItem): string | null {
+  const value = typeof sub.discountValue === "number" ? sub.discountValue : null;
+  if (value === null || value <= 0) return null;
+  if (sub.discountType === "percent") return `disc -${value}%`;
+  return `disc -${formatMoneyUSD(value)}`;
+}
+
+function subItemQty(sub: SubItem): number {
+  const raw = typeof sub.qty === "number" ? sub.qty : null;
+  return raw !== null && raw > 0 ? Math.round(raw) : 1;
+}
+
 function subItemTotalOrNull(sub: SubItem): number | null {
   const base = subItemPreDiscountTotalOrNull(sub);
   if (base === null) return null;
-  const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
-  return Math.max(0, base - discount);
+  const discount = subItemDiscountAmount(sub, base);
+  return Math.max(0, base - discount) * subItemQty(sub);
+}
+
+function fileExt(name: string | null | undefined): string {
+  const value = String(name || "").trim().toLowerCase();
+  const idx = value.lastIndexOf(".");
+  if (idx <= -1 || idx === value.length - 1) return "";
+  return value.slice(idx + 1);
+}
+
+function isImageFileLike(file: File): boolean {
+  if (file.type.startsWith("image/")) return true;
+  return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "heic", "heif", "avif"].includes(fileExt(file.name));
+}
+
+function isPdfFileLike(file: File): boolean {
+  return file.type === "application/pdf" || fileExt(file.name) === "pdf";
 }
 
 const CATEGORY_PRESETS: Record<string, string[]> = {
@@ -207,6 +245,7 @@ export default function ItemDetail() {
     [options, id],
   );
   const itemHasOptions = itemOptions.length > 0;
+  const itemIsPlaceholder = inferItemKind(item, itemHasOptions) === "placeholder";
 
   const subItemsByOption = useMemo(() => {
     const map = new Map<string, SubItem[]>();
@@ -243,8 +282,8 @@ export default function ItemDetail() {
         for (const sub of subs) {
           const base = subItemPreDiscountTotalOrNull(sub);
           if (base === null) continue;
-          const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
-          total += Math.max(0, base - discount);
+          const discount = subItemDiscountAmount(sub, base);
+          total += Math.max(0, base - discount) * subItemQty(sub);
           hasAny = true;
         }
         return hasAny ? total : null;
@@ -321,7 +360,7 @@ export default function ItemDetail() {
     if (!selectedOptionId) return null;
     return itemOptions.find((o) => o.id === selectedOptionId) || null;
   }, [itemOptions, selectedOptionId]);
-  const displayStoreName = selectedOption?.store || (!itemHasOptions ? item?.store : null);
+  const displayStoreName = selectedOption?.store || (!itemIsPlaceholder ? item?.store : null);
   const storeForItem = useMemo(() => {
     const key = storeKey(displayStoreName);
     if (!key) return null;
@@ -339,7 +378,7 @@ export default function ItemDetail() {
     [selectedOptions, subItemsByOption],
   );
   const hasSelectedSubItems = selectedOptionSubItems.length > 0;
-  const placeholderFields = itemHasOptions;
+  const placeholderFields = itemIsPlaceholder;
   const placeholderNote = placeholderFields
     ? hasSelectedSubItems
       ? "Pricing is handled by the selected option's sub-items. Item-level fields are placeholders only."
@@ -434,6 +473,10 @@ export default function ItemDetail() {
       .filter((i) => i.id !== item.id)
       .filter((i) => !importedSourceItemIds.has(i.id))
       .filter((i) => {
+        const candidateHasOptions = options.some((o) => o.syncState !== "deleted" && o.itemId === i.id);
+        return inferItemKind(i, candidateHasOptions) === "standalone";
+      })
+      .filter((i) => {
         const link = normalizeLink(i.link || "");
         if (link && existingParentLinks.has(link)) return false;
         return true;
@@ -445,7 +488,7 @@ export default function ItemDetail() {
         return includesText(blob, needle);
       })
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [existingParentLinks, importQuery, importedSourceItemIds, item, items]);
+  }, [existingParentLinks, importQuery, importedSourceItemIds, item, items, options]);
 
   const roomMeasurements = useMemo(() => {
     return measurements.filter((m) => m.syncState !== "deleted" && m.room === item?.room);
@@ -626,6 +669,7 @@ export default function ItemDetail() {
         room: item.room,
         category: item.category,
         status: item.status,
+        kind: inferItemKind(item, itemOptions.length > 0),
         price: item.price ?? null,
         discountType: item.discountType ?? null,
         discountValue: item.discountValue ?? null,
@@ -691,8 +735,10 @@ export default function ItemDetail() {
           const newSubId = await createSubItem({
             optionId: newOptId,
             title: sub.title,
+            qty: subItemQty(sub),
             price: sub.price ?? null,
             taxEstimate: sub.taxEstimate ?? null,
+            discountType: sub.discountType ?? null,
             discountValue: sub.discountValue ?? null,
             extraWarrantyCost: sub.extraWarrantyCost ?? null,
             notes: sub.notes ?? null,
@@ -764,8 +810,10 @@ export default function ItemDetail() {
         const newSubId = await createSubItem({
           optionId: newOptId,
           title: sub.title,
+          qty: subItemQty(sub),
           price: sub.price ?? null,
           taxEstimate: sub.taxEstimate ?? null,
+          discountType: sub.discountType ?? null,
           discountValue: sub.discountValue ?? null,
           extraWarrantyCost: sub.extraWarrantyCost ?? null,
           notes: sub.notes ?? null,
@@ -800,7 +848,7 @@ export default function ItemDetail() {
     const shareTitle = selectedOption ? `${item.name} · ${selectedOption.title}` : item.name;
     const shareTotal = typeof effectivePriceValue === "number" ? effectivePriceValue : null;
     const shareStore = displayStoreName;
-    const shareLink = selectedOption?.link || (!itemHasOptions ? item.link : null);
+    const shareLink = selectedOption?.link || (!itemIsPlaceholder ? item.link : null);
     const parts = [
       shareTitle,
       roomLabel ? `Room: ${roomLabel}` : "",
@@ -841,7 +889,44 @@ export default function ItemDetail() {
     }
   }
 
+  async function onConvertToPlaceholder() {
+    try {
+      await commit({
+        kind: "placeholder",
+        price: null,
+        discountType: null,
+        discountValue: null,
+        store: null,
+        link: null,
+      });
+      setPrice("");
+      setDiscountValue("");
+      setStore("");
+      setLink("");
+      toast({ title: "Converted", description: "This item is now a placeholder for variations." });
+    } catch (err: any) {
+      toast({ title: "Conversion failed", description: err?.message || "Could not convert this item." });
+    }
+  }
+
+  async function onConvertToStandalone() {
+    if (itemOptions.length) {
+      toast({ title: "Remove variations first", description: "A placeholder with variations cannot be converted to standalone." });
+      return;
+    }
+    try {
+      await commit({ kind: "standalone" });
+      toast({ title: "Converted", description: "This item is now standalone." });
+    } catch (err: any) {
+      toast({ title: "Conversion failed", description: err?.message || "Could not convert this item." });
+    }
+  }
+
   async function onAddOption() {
+    if (!itemIsPlaceholder) {
+      toast({ title: "Placeholder required", description: "Convert this item to a placeholder to add variations." });
+      return;
+    }
     const title = prompt("Option title (e.g. IKEA - MALM dresser)")?.trim();
     if (!title) return;
     await createOption({ itemId: item.id, title });
@@ -862,6 +947,10 @@ export default function ItemDetail() {
 
   async function onImportExistingItem() {
     if (!item || !importSelectedId || importBusy) return;
+    if (!itemIsPlaceholder) {
+      toast({ title: "Placeholder required", description: "Only placeholder items can import variations." });
+      return;
+    }
     setImportBusy(true);
     try {
       await convertItemToOption(item.id, importSelectedId);
@@ -900,7 +989,7 @@ export default function ItemDetail() {
       return;
     }
     const incoming = Array.from(files)
-      .filter((f) => (parentType === "subItem" ? f.type.startsWith("image/") || f.type === "application/pdf" : f.type.startsWith("image/")))
+      .filter((f) => (parentType === "subItem" ? isImageFileLike(f) || isPdfFileLike(f) : isImageFileLike(f)))
       .slice(0, remainingSlots);
     if (!incoming.length) {
       toast({
@@ -913,7 +1002,10 @@ export default function ItemDetail() {
       await Promise.all(incoming.map((file) => addAttachment(parentType, parentId, file)));
       await refreshAttachments(parentType, parentId);
     } catch (err: any) {
-      toast({ title: "Photo upload failed", description: err?.message || "Could not upload photo." });
+      toast({
+        title: parentType === "subItem" ? "Receipt upload failed" : "Photo upload failed",
+        description: err?.message || (parentType === "subItem" ? "Could not upload receipt." : "Could not upload photo."),
+      });
     }
   }
 
@@ -967,6 +1059,14 @@ export default function ItemDetail() {
     setCompareOpen(false);
   }, [optionOnlyId]);
 
+  useEffect(() => {
+    if (itemIsPlaceholder) return;
+    setCompareOpen(false);
+    setImportOpen(false);
+    setOptionOnlyId(null);
+    setReorderMode(false);
+  }, [itemIsPlaceholder]);
+
   const itemModifiedFields = Array.isArray(item?.provenance?.modifiedFields) ? item?.provenance?.modifiedFields : [];
 
   if (!id) return null;
@@ -995,6 +1095,16 @@ export default function ItemDetail() {
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <StatusBadge status={item.status} />
+              <Badge
+                variant="outline"
+                className={
+                  itemIsPlaceholder
+                    ? "border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-amber-900 shadow-sm hover:bg-amber-100"
+                    : "border border-slate-300/90 bg-gradient-to-r from-slate-100 to-zinc-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-slate-700 shadow-sm hover:from-slate-100 hover:to-zinc-100"
+                }
+              >
+                {itemIsPlaceholder ? "Placeholder item" : "Standalone item"}
+              </Badge>
               <ReviewStatusBadge status={item.provenance?.reviewStatus} />
               <DataSourceBadge dataSource={item.provenance?.dataSource} />
               {effectivePriceValue !== null ? <span className="text-sm font-semibold">{formatMoneyUSD(effectivePriceValue)}</span> : null}
@@ -1017,6 +1127,13 @@ export default function ItemDetail() {
               </Button>
             ) : (
               <>
+                <Button
+                  variant="secondary"
+                  onClick={() => void (itemIsPlaceholder ? onConvertToStandalone() : onConvertToPlaceholder())}
+                  disabled={itemIsPlaceholder && itemOptions.length > 0}
+                >
+                  {itemIsPlaceholder ? "Make standalone" : "Make placeholder"}
+                </Button>
                 <Button variant="secondary" onClick={() => void onShareItem()}>
                   Share
                 </Button>
@@ -1679,9 +1796,13 @@ export default function ItemDetail() {
       <Card className="p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold">{optionOnly ? "Editing option" : "Options"}</div>
+            <div className="text-sm font-semibold">{optionOnly ? "Editing option" : itemIsPlaceholder ? "Options" : "Variations"}</div>
             <div className="text-xs text-muted-foreground">
-              {optionOnly ? "You are editing a single variation for this item." : "Track candidates, compare, then select a winner."}
+              {optionOnly
+                ? "You are editing a single variation for this item."
+                : itemIsPlaceholder
+                  ? "Track candidates, compare, then select a winner."
+                  : "Convert this item to a placeholder to manage variations."}
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1689,7 +1810,7 @@ export default function ItemDetail() {
               <Button variant="secondary" onClick={() => setOptionOnlyId(null)}>
                 Show all options
               </Button>
-            ) : (
+            ) : itemIsPlaceholder ? (
               <>
                 <Button variant="secondary" onClick={() => setCompareOpen(true)} disabled={!itemOptions.length}>
                   Compare options
@@ -1701,11 +1822,19 @@ export default function ItemDetail() {
                   + Add option
                 </Button>
               </>
+            ) : (
+              <Button variant="secondary" onClick={() => void onConvertToPlaceholder()}>
+                Convert to Placeholder
+              </Button>
             )}
           </div>
         </div>
 
-        {!optionOnly ? (
+        {!itemIsPlaceholder && !optionOnly ? (
+          <div className="mt-4 rounded-lg border bg-secondary/20 p-3 text-sm text-muted-foreground">
+            Placeholder items hold variations. Standalone items represent a single concrete buy option.
+          </div>
+        ) : !optionOnly ? (
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             <div className="space-y-1.5">
               <Label>Sort by</Label>
@@ -1764,7 +1893,8 @@ export default function ItemDetail() {
           </div>
         )}
 
-        <div className="mt-3 space-y-3">
+        {itemIsPlaceholder || optionOnly ? (
+          <div className="mt-3 space-y-3">
           {!optionOnly && reorderMode && itemOptions.length ? (
             <DragReorderList
               ariaLabel={`Reorder options for ${item.name}`}
@@ -1804,8 +1934,8 @@ export default function ItemDetail() {
                       for (const sub of optionSubItems) {
                         const base = subItemPreDiscountTotalOrNull(sub);
                         if (base === null) continue;
-                        const subDiscount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
-                        total += Math.max(0, base - subDiscount);
+                        const subDiscount = subItemDiscountAmount(sub, base);
+                        total += Math.max(0, base - subDiscount) * subItemQty(sub);
                         hasAny = true;
                       }
                       if (!hasAny) return null;
@@ -1813,7 +1943,17 @@ export default function ItemDetail() {
                     })();
                     const optionQty = isSelected ? item?.qty || 1 : 1;
                     return (
-                      <Card key={o.id} className={["p-3", isBest ? "border-emerald-200/80 bg-emerald-50/40" : ""].join(" ")}>
+                      <Card
+                        key={o.id}
+                        className={[
+                          "p-2.5 transition-colors sm:p-3",
+                          isSelected
+                            ? "border border-sky-300/90 bg-gradient-to-r from-sky-50/95 to-cyan-50/70 ring-1 ring-sky-200/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
+                            : isBest
+                              ? "border-emerald-200/80 bg-emerald-50/40"
+                              : "",
+                        ].join(" ")}
+                      >
                         <div className="flex items-start justify-between gap-3">
                           <button
                             type="button"
@@ -1824,7 +1964,9 @@ export default function ItemDetail() {
                               <div className="min-w-0">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <div className="truncate text-base font-semibold">{o.title}</div>
-                                  {isSelected ? <Badge>Selected</Badge> : null}
+                                  {isSelected ? (
+                                    <Badge className="border border-sky-300/90 bg-sky-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-sky-900 shadow-sm hover:bg-sky-100">Selected</Badge>
+                                  ) : null}
                                   {isBest ? <Badge variant="secondary">Top pick</Badge> : null}
                                 </div>
                               </div>
@@ -2176,6 +2318,7 @@ export default function ItemDetail() {
                                 <div className="mt-4 space-y-3">
                                   {optionSubItems.map((sub) => {
                                     const total = subItemTotalOrNull(sub);
+                                    const lineQty = subItemQty(sub);
                                     return (
                                       <Card key={sub.id} className="p-3">
                                         <div className="flex items-start justify-between gap-3">
@@ -2183,7 +2326,11 @@ export default function ItemDetail() {
                                             <div className="truncate text-base font-semibold">{sub.title}</div>
                                             <div className="mt-1 text-xs text-muted-foreground">
                                               {total !== null ? formatMoneyUSD(total) : "no total"}
+                                              {lineQty > 1 ? ` · qty ${lineQty}` : ""}
                                             </div>
+                                            {subItemDiscountLabel(sub) ? (
+                                              <div className="mt-1 text-xs text-muted-foreground">{subItemDiscountLabel(sub)}</div>
+                                            ) : null}
                                           </div>
                                           <Button variant="destructive" size="sm" onClick={() => void onDeleteSubItem(sub)}>
                                             Delete
@@ -2198,6 +2345,20 @@ export default function ItemDetail() {
                                               defaultValue={sub.title}
                                               className="h-11 text-base"
                                               onBlur={(e) => void updateSubItem(sub.id, { title: e.target.value.trim() || "Sub-item" })}
+                                            />
+                                          </div>
+                                          <div className="space-y-1.5">
+                                            <Label>Qty</Label>
+                                            <Input
+                                              key={`${sub.id}-qty-${lineQty}`}
+                                              inputMode="numeric"
+                                              defaultValue={String(lineQty)}
+                                              placeholder="1"
+                                              className="h-11 text-base"
+                                              onBlur={(e) => {
+                                                const n = parseNumberOrNull(e.target.value);
+                                                void updateSubItem(sub.id, { qty: n && n > 0 ? Math.round(n) : 1 });
+                                              }}
                                             />
                                           </div>
                                           <div className="space-y-1.5">
@@ -2234,12 +2395,40 @@ export default function ItemDetail() {
                                             />
                                           </div>
                                           <div className="space-y-1.5">
-                                            <Label>Discount</Label>
+                                            <div className="flex items-center justify-between gap-2">
+                                              <Label>Discount</Label>
+                                              <div className="flex rounded-full border bg-background p-0.5 text-xs">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void updateSubItem(sub.id, { discountType: "amount" })}
+                                                  className={[
+                                                    "rounded-full px-3 py-1 text-xs font-medium",
+                                                    sub.discountType === "percent"
+                                                      ? "text-muted-foreground"
+                                                      : "bg-foreground text-background",
+                                                  ].join(" ")}
+                                                >
+                                                  $
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => void updateSubItem(sub.id, { discountType: "percent" })}
+                                                  className={[
+                                                    "rounded-full px-3 py-1 text-xs font-medium",
+                                                    sub.discountType === "percent"
+                                                      ? "bg-foreground text-background"
+                                                      : "text-muted-foreground",
+                                                  ].join(" ")}
+                                                >
+                                                  %
+                                                </button>
+                                              </div>
+                                            </div>
                                             <Input
-                                              key={`${sub.id}-discount-${sub.discountValue ?? ""}`}
+                                              key={`${sub.id}-discount-${sub.discountType ?? "amount"}-${sub.discountValue ?? ""}`}
                                               inputMode="decimal"
                                               defaultValue={typeof sub.discountValue === "number" ? String(sub.discountValue) : ""}
-                                              placeholder="$"
+                                              placeholder={sub.discountType === "percent" ? "%" : "$"}
                                               className="h-11 text-base"
                                               onBlur={(e) => void updateSubItem(sub.id, { discountValue: parseNumberOrNull(e.target.value) })}
                                             />
@@ -2432,9 +2621,10 @@ export default function ItemDetail() {
               </div>
             </div>
           )}
-        </div>
+          </div>
+        ) : null}
 
-        {!optionOnly && !reorderMode && totalPages > 1 ? (
+        {itemIsPlaceholder && !optionOnly && !reorderMode && totalPages > 1 ? (
           <div className="mt-3 flex items-center justify-between">
             <div className="text-xs text-muted-foreground">
               Page {optionPage} of {totalPages}
@@ -2450,7 +2640,7 @@ export default function ItemDetail() {
           </div>
         ) : null}
 
-        {!optionOnly ? (
+        {itemIsPlaceholder && !optionOnly ? (
           <div className="mt-3">
             <Button
               variant={reorderMode ? "default" : "secondary"}
@@ -2467,6 +2657,7 @@ export default function ItemDetail() {
       <Card className="p-4">
         <div className="text-sm font-semibold">Relationships</div>
         <div className="mt-2 space-y-1 text-sm text-muted-foreground">
+          <div>Item type: {itemIsPlaceholder ? "Placeholder" : "Standalone"}</div>
           <div>
             Parent item:{" "}
             {optionOnly ? (
@@ -2578,14 +2769,16 @@ export default function ItemDetail() {
                         key={o.id}
                         className={[
                           "border-t",
-                          isSelected ? "bg-primary/10" : "",
+                          isSelected ? "bg-sky-100/70" : "",
                           !isSelected && isBest ? "bg-emerald-50/60" : "",
                         ].join(" ")}
                       >
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium">{o.title}</span>
-                            {isSelected ? <Badge>Selected</Badge> : null}
+                            {isSelected ? (
+                              <Badge className="border border-sky-300/90 bg-sky-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-sky-900 shadow-sm hover:bg-sky-100">Selected</Badge>
+                            ) : null}
                             {isBest ? <Badge variant="secondary">Top pick</Badge> : null}
                           </div>
                         </td>
@@ -2638,6 +2831,7 @@ function SubItemReceipts({
 }) {
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const max = 3;
 
   useEffect(() => {
     const next: Record<string, string> = {};
@@ -2661,7 +2855,7 @@ function SubItemReceipts({
     <div className="mt-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs font-semibold">Receipts</div>
-        <Button type="button" size="sm" variant="secondary" onClick={() => fileRef.current?.click()}>
+        <Button type="button" size="sm" variant="secondary" onClick={() => fileRef.current?.click()} disabled={attachments.length >= max}>
           Add receipt
         </Button>
       </div>
@@ -2669,6 +2863,7 @@ function SubItemReceipts({
         ref={fileRef}
         type="file"
         accept="application/pdf,image/*"
+        multiple
         className="hidden"
         onChange={(e) => {
           onAdd(e.target.files);

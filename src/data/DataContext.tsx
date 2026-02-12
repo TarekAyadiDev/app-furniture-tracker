@@ -4,6 +4,7 @@ import type {
   ExportBundleV1,
   ExportBundleV2,
   Item,
+  ItemKind,
   Measurement,
   Option,
   PlannerAttachmentV1,
@@ -13,7 +14,7 @@ import type {
   Store,
   SubItem,
 } from "@/lib/domain";
-import { DEFAULT_ROOMS, ITEM_STATUSES } from "@/lib/domain";
+import { DEFAULT_ROOMS, ITEM_STATUSES, inferItemKind, normalizeItemKind } from "@/lib/domain";
 import { formatMoneyUSD, nowMs, parseNumberOrNull } from "@/lib/format";
 import { diffItem, diffMeasurement, diffOption, diffStore, diffSubItem } from "@/lib/diff";
 import { newId } from "@/lib/id";
@@ -188,6 +189,11 @@ function normalizeStatus(raw: unknown): Item["status"] {
   return (ITEM_STATUSES as readonly string[]).includes(t) ? (t as Item["status"]) : "Idea";
 }
 
+function coerceItemKind(input: unknown): ItemKind | undefined {
+  if (typeof input === "undefined" || input === null) return undefined;
+  return normalizeItemKind(input);
+}
+
 function coerceNumberOrNull(input: unknown): number | null {
   if (typeof input === "number") return Number.isFinite(input) ? input : null;
   if (typeof input === "string") return parseNumberOrNull(input);
@@ -245,6 +251,11 @@ function coerceTags(input: unknown): string[] | null {
   return cleaned.length ? cleaned : null;
 }
 
+function coerceQty(input: unknown): number {
+  const n = coerceNumberOrNull(input);
+  return n !== null && n > 0 ? Math.round(n) : 1;
+}
+
 function itemDiscountAmount(item: Item): number | null {
   const value = typeof item.discountValue === "number" ? item.discountValue : null;
   if (value === null || value <= 0) return null;
@@ -256,6 +267,16 @@ function itemDiscountAmount(item: Item): number | null {
     return (price * value) / 100;
   }
   return null;
+}
+
+function subItemDiscountAmount(sub: Pick<SubItem, "discountType" | "discountValue">, base: number): number {
+  const value = typeof sub.discountValue === "number" ? sub.discountValue : null;
+  if (value === null || value <= 0) return 0;
+  if (sub.discountType === "percent") {
+    if (value >= 100) return base;
+    return (base * value) / 100;
+  }
+  return Math.min(value, base);
 }
 
 function dimsFromLegacySpecs(specs: Item["specs"]): Item["dimensions"] | undefined {
@@ -297,7 +318,7 @@ function parseAttachmentMeta(raw: any): AttachmentMeta | null {
   };
 }
 
-function attachmentParentKey(parentType: "item" | "option", parentId: string) {
+function attachmentParentKey(parentType: "item" | "option" | "subItem", parentId: string) {
   return `${parentType}:${parentId}`;
 }
 
@@ -441,25 +462,25 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         })
       : [];
 
-    const items: Item[] = (obj.items as unknown[]).map((it) => {
+    const rawItems: Item[] = (obj.items as unknown[]).map((it) => {
       const iid = typeof (it as any)?.id === "string" ? (it as any).id : newId("i");
       const room = normalizeRoomId((it as any)?.room) ?? rooms[0]?.id ?? DEFAULT_ROOMS[0];
       ensureRoom(room);
       const createdAt = coerceNumberOrNull((it as any)?.createdAt) ?? nowMs();
       const updatedAt = coerceNumberOrNull((it as any)?.updatedAt) ?? createdAt;
-      const qtyRaw = coerceNumberOrNull((it as any)?.qty);
       return {
         id: iid,
         name: String((it as any)?.name || "").trim() || "Item",
         room,
         category: String((it as any)?.category || "Other").trim() || "Other",
         status: normalizeStatus((it as any)?.status),
+        kind: coerceItemKind((it as any)?.kind ?? (it as any)?.itemType),
         selectedOptionId: typeof (it as any)?.selectedOptionId === "string" ? (it as any).selectedOptionId : null,
         sort: coerceSort((it as any)?.sort),
         price: coerceNumberOrNull((it as any)?.price),
         discountType: coerceDiscountType((it as any)?.discountType),
         discountValue: coerceNumberOrNull((it as any)?.discountValue),
-        qty: qtyRaw !== null && qtyRaw > 0 ? Math.round(qtyRaw) : 1,
+        qty: coerceQty((it as any)?.qty),
         store: normalizeStoreName((it as any)?.store) || null,
         link: typeof (it as any)?.link === "string" ? (it as any).link : null,
         notes: typeof (it as any)?.notes === "string" ? (it as any).notes : null,
@@ -513,6 +534,11 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         })
       : [];
 
+    const items: Item[] = rawItems.map((it) => ({
+      ...it,
+      kind: inferItemKind(it, options.some((o) => o.itemId === it.id)),
+    }));
+
     const optionsByItem = new Map<string, Option[]>();
     for (const opt of options) {
       if (!optionsByItem.has(opt.itemId)) optionsByItem.set(opt.itemId, []);
@@ -554,8 +580,12 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
             optionId,
             title: String((raw as any)?.title || "").trim() || "Sub-item",
             sort: coerceSort((raw as any)?.sort),
+            qty: coerceQty((raw as any)?.qty ?? (raw as any)?.quantity),
             price: coerceNumberOrNull((raw as any)?.price),
             taxEstimate: coerceNumberOrNull((raw as any)?.taxEstimate),
+            discountType:
+              coerceDiscountType((raw as any)?.discountType) ||
+              (coerceNumberOrNull((raw as any)?.discountValue) !== null ? "amount" : null),
             discountValue: coerceNumberOrNull((raw as any)?.discountValue),
             extraWarrantyCost: coerceNumberOrNull((raw as any)?.extraWarrantyCost),
             notes: typeof (raw as any)?.notes === "string" ? (raw as any).notes : null,
@@ -622,6 +652,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         room,
         category: String((it as any)?.category || "Other").trim() || "Other",
         status: normalizeStatus((it as any)?.status),
+        kind: coerceItemKind((it as any)?.kind ?? (it as any)?.itemType),
         sort: nextRoomSort(room),
         price: typeof (it as any)?.price === "number" ? (it as any).price : null,
         qty: typeof (it as any)?.quantity === "number" ? Math.round((it as any).quantity) : 1,
@@ -669,6 +700,12 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
         } satisfies Option;
       })
       .filter(Boolean) as Option[];
+
+    const optionsItemIds = new Set(options.map((o) => o.itemId));
+    const itemsWithKind: Item[] = items.map((it) => ({
+      ...it,
+      kind: inferItemKind(it, optionsItemIds.has(it.id)),
+    }));
 
     const nextMeasSortByRoom: Record<RoomId, number> = {};
 
@@ -720,7 +757,7 @@ function normalizeBundle(raw: unknown): ExportBundleV1 | ExportBundleV2 | null {
       home,
       rooms,
       measurements,
-      items,
+      items: itemsWithKind,
       options,
     };
   }
@@ -834,10 +871,22 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       });
     }
 
+    let migratedItems = snap.items;
+    let didMigrateItems = false;
+    if (snap.items.some((it) => inferItemKind(it, optionsByItem.has(it.id)) !== it.kind)) {
+      migratedItems = snap.items.map((it) => {
+        const nextKind = inferItemKind(it, optionsByItem.has(it.id));
+        if (nextKind === it.kind) return it;
+        didMigrateItems = true;
+        return { ...it, kind: nextKind };
+      });
+      if (didMigrateItems) await idbBulkPut("items", migratedItems);
+    }
+
     let migratedSubItems = snap.subItems;
     let didMigrateSubItems = false;
     if (snap.subItems.some((s) => !(s as any)?.optionId)) {
-      const itemById = new Map(snap.items.map((it) => [it.id, it]));
+      const itemById = new Map(migratedItems.map((it) => [it.id, it]));
       migratedSubItems = snap.subItems.map((s) => {
         const existingOptionId = typeof (s as any)?.optionId === "string" ? (s as any).optionId : "";
         if (existingOptionId) return s as SubItem;
@@ -903,7 +952,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       createdStores.push(store);
       nextStores.push(store);
     };
-    for (const it of snap.items) {
+    for (const it of migratedItems) {
       if (it.syncState === "deleted") continue;
       ensureStore(it.store);
     }
@@ -917,7 +966,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setPlanner(plannerMeta);
     setRooms(nextRooms);
     setMeasurements(snap.measurements);
-    setItems(snap.items);
+    setItems(migratedItems);
     setOptions(snap.options);
     setSubItems(migratedSubItems as SubItem[]);
     setStores(nextStores);
@@ -1024,6 +1073,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         room,
         category: (partial.category || "Other").toString().trim() || "Other",
         status: normalizeStatus(partial.status),
+        kind: normalizeItemKind(partial.kind),
         selectedOptionId: typeof partial.selectedOptionId === "string" ? partial.selectedOptionId : null,
         sort,
         price: typeof partial.price === "number" ? partial.price : null,
@@ -1052,10 +1102,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const all = await idbGetAll<Item>("items");
     const cur = all.find((x) => x.id === id);
     if (!cur) return;
+    if (patch.kind === "standalone") {
+      const allOptions = await idbGetAll<Option>("options");
+      const hasOptions = allOptions.some((o) => o.syncState !== "deleted" && o.itemId === id);
+      if (hasOptions) throw new Error("Remove variations before converting this placeholder to a standalone item.");
+    }
     const ts = nowMs();
     const nextTags = typeof patch.tags === "undefined" ? cur.tags ?? null : coerceTags(patch.tags);
     const nextDiscountType = typeof patch.discountType === "undefined" ? cur.discountType ?? null : coerceDiscountType(patch.discountType);
     const nextDiscountValue = typeof patch.discountValue === "undefined" ? cur.discountValue ?? null : coerceNumberOrNull(patch.discountValue);
+    const nextKind = typeof patch.kind === "undefined" ? inferItemKind(cur) : normalizeItemKind(patch.kind);
     const next: Item = {
       ...cur,
       ...patch,
@@ -1063,6 +1119,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       status: normalizeStatus(patch.status ?? cur.status),
       category: typeof patch.category === "string" ? patch.category : cur.category,
       name: typeof patch.name === "string" ? patch.name : cur.name,
+      kind: nextKind,
       tags: nextTags,
       discountType: nextDiscountType,
       discountValue: nextDiscountValue,
@@ -1106,6 +1163,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       room: parent.room,
       category: parent.category,
       status: parent.status,
+      kind: "standalone",
       selectedOptionId: newOptionId,
       sort: nextSort,
       price: null,
@@ -1202,6 +1260,15 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const source = allItems.find((x) => x.id === sourceItemId && x.syncState !== "deleted");
     if (!parent || !source) throw new Error("Item not found or already removed.");
 
+    const parentHasOptions = allOptions.some((o) => o.syncState !== "deleted" && o.itemId === parent.id);
+    const parentKind = inferItemKind(parent, parentHasOptions);
+    if (parentKind !== "placeholder") throw new Error("Only placeholder items can contain variations.");
+
+    const sourceHasOptions = allOptions.some((o) => o.syncState !== "deleted" && o.itemId === source.id);
+    const sourceKind = inferItemKind(source, sourceHasOptions);
+    if (sourceKind === "placeholder") throw new Error("Placeholder items cannot be imported as variations.");
+    if (sourceHasOptions) throw new Error("Only standalone items can be imported as variations.");
+
     const existingOptions = allOptions.filter((o) => o.syncState !== "deleted" && o.itemId === parentItemId);
     const sourceLink = String(source.link || "").trim().toLowerCase();
     const sourceTitle = String(source.name || "").trim().toLowerCase();
@@ -1291,7 +1358,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const createOption = useCallback(async (partial: Partial<Option> & { itemId: string }) => {
     const ts = nowMs();
-    const allExisting = await idbGetAll<Option>("options");
+    const [allExisting, allItems] = await Promise.all([idbGetAll<Option>("options"), idbGetAll<Item>("items")]);
+    const parentItem = allItems.find((i) => i.syncState !== "deleted" && i.id === partial.itemId);
+    if (!parentItem) throw new Error("Parent item not found.");
+    const parentHasOptions = allExisting.some((o) => o.syncState !== "deleted" && o.itemId === parentItem.id);
+    if (inferItemKind(parentItem, parentHasOptions) !== "placeholder") {
+      throw new Error("Only placeholder items can contain variations.");
+    }
     const minSort = allExisting
       .filter((o) => o.syncState !== "deleted" && o.itemId === partial.itemId && typeof o.sort === "number")
       .reduce((min, o) => Math.min(min, o.sort as number), 0);
@@ -1343,6 +1416,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       .reduce((min, s) => Math.min(min, s.sort as number), 0);
     const sort = minSort - 1;
     const id = newId("si");
+    const qty = coerceQty(partial.qty);
+    const discountValue = typeof partial.discountValue === "number" ? partial.discountValue : null;
+    const discountType = coerceDiscountType(partial.discountType) || (discountValue !== null ? "amount" : null);
     const sub: SubItem = {
       id,
       remoteId: null,
@@ -1350,9 +1426,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       optionId: partial.optionId,
       title: (partial.title || "").toString().trim() || "Sub-item",
       sort,
+      qty,
       price: typeof partial.price === "number" ? partial.price : null,
       taxEstimate: typeof partial.taxEstimate === "number" ? partial.taxEstimate : null,
-      discountValue: typeof partial.discountValue === "number" ? partial.discountValue : null,
+      discountType,
+      discountValue,
       extraWarrantyCost: typeof partial.extraWarrantyCost === "number" ? partial.extraWarrantyCost : null,
       notes: typeof partial.notes === "string" ? partial.notes : null,
       provenance: makeHumanCreatedProvenance(partial.provenance, ts),
@@ -1406,13 +1484,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const cur = all.find((x) => x.id === id);
     if (!cur) return;
     const ts = nowMs();
+    const nextQty = typeof patch.qty === "undefined" ? coerceQty(cur.qty) : coerceQty(patch.qty);
+    const nextDiscountValue = typeof patch.discountValue === "undefined" ? cur.discountValue ?? null : coerceNumberOrNull(patch.discountValue);
+    const nextDiscountType =
+      typeof patch.discountType === "undefined"
+        ? cur.discountType ?? (nextDiscountValue !== null ? "amount" : null)
+        : coerceDiscountType(patch.discountType) || (nextDiscountValue !== null ? "amount" : null);
     const next: SubItem = {
       ...cur,
       ...patch,
       title: typeof patch.title === "string" ? patch.title : cur.title,
+      qty: nextQty,
       price: typeof patch.price === "undefined" ? cur.price ?? null : coerceNumberOrNull(patch.price),
       taxEstimate: typeof patch.taxEstimate === "undefined" ? cur.taxEstimate ?? null : coerceNumberOrNull(patch.taxEstimate),
-      discountValue: typeof patch.discountValue === "undefined" ? cur.discountValue ?? null : coerceNumberOrNull(patch.discountValue),
+      discountType: nextDiscountType,
+      discountValue: nextDiscountValue,
       extraWarrantyCost:
         typeof patch.extraWarrantyCost === "undefined" ? cur.extraWarrantyCost ?? null : coerceNumberOrNull(patch.extraWarrantyCost),
       notes: typeof patch.notes === "undefined" ? cur.notes ?? null : typeof patch.notes === "string" ? patch.notes : null,
@@ -1840,8 +1926,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
             const hasSub = price !== null || tax !== null || warranty !== null;
             if (!hasSub) continue;
             const base = (price || 0) + (tax || 0) + (warranty || 0);
-            const discount = typeof sub.discountValue === "number" ? Math.min(sub.discountValue, base) : 0;
-            total += Math.max(0, base - discount);
+            const discount = subItemDiscountAmount(sub, base);
+            const qty = coerceQty(sub.qty);
+            total += Math.max(0, base - discount) * qty;
             hasAny = true;
           }
           return hasAny ? total : null;
@@ -2139,13 +2226,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
     if (measToPut.length) await idbBulkPut("measurements", measToPut);
 
+    const incomingOptionItemIds = new Set((normalized.options || []).map((o) => o.itemId));
     const existingItemsById = new Map((existingSnap?.items || []).map((i) => [i.id, i] as const));
     const itemsToPut: Item[] = [];
     for (const incoming of normalized.items) {
       const existing = existingItemsById.get(incoming.id);
+      const incomingKind = inferItemKind(incoming, incomingOptionItemIds.has(incoming.id));
       if (!existing) {
         itemsToPut.push({
           ...incoming,
+          kind: incomingKind,
           syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",
           remoteId: typeof incoming.remoteId === "undefined" ? null : incoming.remoteId,
           updatedAt: importedAt,
@@ -2158,6 +2248,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       itemsToPut.push({
         ...existing,
         ...incoming,
+        kind: incomingKind,
         createdAt: existing.createdAt,
         remoteId: typeof existing.remoteId === "undefined" ? incoming.remoteId : existing.remoteId,
         syncState: incoming.syncState === "deleted" ? "deleted" : "dirty",

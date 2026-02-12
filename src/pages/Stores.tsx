@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,15 @@ import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { buildStoreIndex, computeStoreAllocation, normalizeStoreName, storeKey } from "@/lib/storePricing";
 import { useToast } from "@/hooks/use-toast";
 import { DragReorderList } from "@/components/reorder/DragReorderList";
+import { listAttachments, type AttachmentRecord } from "@/storage/attachments";
+
+type StoreReceiptEntry = {
+  attachment: AttachmentRecord;
+  itemName: string;
+  optionTitle: string;
+  subItemTitle: string;
+  subItemId: string;
+};
 
 export default function Stores() {
   const { toast } = useToast();
@@ -17,6 +26,7 @@ export default function Stores() {
   const [newName, setNewName] = useState("");
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [reorderMode, setReorderMode] = useState(false);
+  const [storeReceipts, setStoreReceipts] = useState<Record<string, StoreReceiptEntry[]>>({});
 
   const storeByName = useMemo(() => buildStoreIndex(orderedStores), [orderedStores]);
   const itemNameById = useMemo(() => new Map(items.filter((i) => i.syncState !== "deleted").map((i) => [i.id, i.name])), [items]);
@@ -108,6 +118,67 @@ export default function Stores() {
     }
     return map;
   }, [items, options]);
+
+  const openStoreKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const s of orderedStores) {
+      if (!open[s.id]) continue;
+      const key = storeKey(s.name);
+      if (key) keys.add(key);
+    }
+    return keys;
+  }, [open, orderedStores]);
+
+  const optionById = useMemo(() => {
+    const map = new Map<string, (typeof options)[number]>();
+    for (const opt of options) {
+      if (opt.syncState === "deleted") continue;
+      map.set(opt.id, opt);
+    }
+    return map;
+  }, [options]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadStoreReceipts() {
+      if (!openStoreKeys.size) {
+        if (active) setStoreReceipts({});
+        return;
+      }
+      const next: Record<string, StoreReceiptEntry[]> = {};
+      for (const sub of subItems) {
+        if (sub.syncState === "deleted") continue;
+        const opt = optionById.get(sub.optionId);
+        if (!opt) continue;
+        const key = storeKey(opt.store);
+        if (!key || !openStoreKeys.has(key)) continue;
+        const atts = await listAttachments("subItem", sub.id);
+        if (!atts.length) continue;
+        if (!next[key]) next[key] = [];
+        const itemName = itemNameById.get(opt.itemId) || "Item";
+        const optionTitle = opt.title || "Option";
+        const subItemTitle = sub.title || "Sub-item";
+        for (const att of atts) {
+          next[key].push({
+            attachment: att,
+            itemName,
+            optionTitle,
+            subItemTitle,
+            subItemId: sub.id,
+          });
+        }
+      }
+      for (const key of Object.keys(next)) {
+        next[key].sort((a, b) => b.attachment.updatedAt - a.attachment.updatedAt);
+      }
+      if (!active) return;
+      setStoreReceipts(next);
+    }
+    void loadStoreReceipts();
+    return () => {
+      active = false;
+    };
+  }, [itemNameById, openStoreKeys, optionById, subItems]);
 
   async function onAddStore() {
     const name = normalizeStoreName(newName);
@@ -238,6 +309,8 @@ export default function Stores() {
                       }}
                     />
                   </div>
+
+                  <StoreReceiptsPanel entries={key ? storeReceipts[key] || [] : []} />
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1.5">
@@ -394,6 +467,63 @@ export default function Stores() {
           </Button>
         </div>
       </Card>
+    </div>
+  );
+}
+
+function StoreReceiptsPanel({ entries }: { entries: StoreReceiptEntry[] }) {
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const next: Record<string, string> = {};
+    const toRevoke: string[] = [];
+    for (const entry of entries) {
+      const att = entry.attachment;
+      if (att.sourceUrl) {
+        next[att.id] = att.sourceUrl;
+        continue;
+      }
+      const url = URL.createObjectURL(att.blob);
+      next[att.id] = url;
+      toRevoke.push(url);
+    }
+    setUrls(next);
+    return () => {
+      toRevoke.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [entries]);
+
+  return (
+    <div className="rounded-lg border bg-secondary/20 p-3">
+      <div className="text-sm font-semibold">Receipts</div>
+      <div className="text-xs text-muted-foreground">Auto-linked from sub-items using this store.</div>
+      {entries.length ? (
+        <div className="mt-2 space-y-2">
+          {entries.map((entry) => {
+            const att = entry.attachment;
+            const key = `${att.id}:${entry.subItemId}`;
+            return (
+              <div key={key} className="flex items-center justify-between gap-3 rounded-lg border bg-background/70 px-3 py-2 text-xs">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{att.name || "Receipt"}</div>
+                  <div className="truncate text-[10px] text-muted-foreground">
+                    {entry.itemName} · {entry.optionTitle} · {entry.subItemTitle}
+                  </div>
+                </div>
+                {urls[att.id] ? (
+                  <a href={urls[att.id]} target="_blank" rel="noreferrer" className="whitespace-nowrap text-primary underline">
+                    View
+                  </a>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">Loading</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="mt-2 text-xs text-muted-foreground">No sub-item receipts for this store yet.</div>
+      )}
     </div>
   );
 }

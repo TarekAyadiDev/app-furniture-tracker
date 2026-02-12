@@ -1,4 +1,4 @@
-import type { Item, Option, Store, SubItem } from "@/lib/domain";
+import { inferItemKind, type Item, type Option, type Store, type SubItem } from "@/lib/domain";
 
 export function normalizeStoreName(value: unknown): string {
   return String(value ?? "").trim();
@@ -113,9 +113,18 @@ function subItemPreDiscountTotalOrNull(sub: SubItem): number | null {
   return (price || 0) + (tax || 0) + (warranty || 0);
 }
 
+function subItemQty(sub: SubItem): number {
+  const raw = typeof sub.qty === "number" ? sub.qty : null;
+  return raw !== null && raw > 0 ? Math.round(raw) : 1;
+}
+
 function subItemDiscountAmount(sub: SubItem, base: number): number {
   const value = typeof sub.discountValue === "number" ? sub.discountValue : 0;
   if (value <= 0) return 0;
+  if (sub.discountType === "percent") {
+    if (value >= 100) return base;
+    return (base * value) / 100;
+  }
   return Math.min(value, base);
 }
 
@@ -153,6 +162,7 @@ export function computeStoreAllocation(
   for (const item of items) {
     if (item.syncState === "deleted") continue;
     const hasOptions = hasOptionsByItem?.has(item.id) ?? false;
+    const isPlaceholder = inferItemKind(item, hasOptions) === "placeholder";
     const selected = selectedOptionsByItem.get(item.id) || [];
     let baseTotal: number | null = null;
     let discountTotal = 0;
@@ -168,8 +178,9 @@ export function computeStoreAllocation(
             const preDiscount = subItemPreDiscountTotalOrNull(sub);
             if (preDiscount === null) continue;
             const subDiscount = subItemDiscountAmount(sub, preDiscount);
-            base += Math.max(0, preDiscount - subDiscount);
-            discount += subDiscount;
+            const qty = subItemQty(sub);
+            base += Math.max(0, preDiscount - subDiscount) * qty;
+            discount += subDiscount * qty;
             hasAny = true;
             hasSubValues = true;
           }
@@ -192,7 +203,7 @@ export function computeStoreAllocation(
         discountTotal = discount * qty;
       }
     } else {
-      if (!hasOptions) {
+      if (!isPlaceholder) {
         const price = typeof item.price === "number" ? item.price : null;
         if (price !== null) {
           const itemDiscountRaw = itemBaseDiscountAmount(item) || 0;
@@ -209,7 +220,7 @@ export function computeStoreAllocation(
     let key: string | null = null;
     if (selected.length) {
       key = storeKey(selected[0]?.store) || null;
-    } else if (!hasOptions) {
+    } else if (!isPlaceholder) {
       key = storeKey(item.store) || null;
     }
     itemStoreKey.set(item.id, key || null);

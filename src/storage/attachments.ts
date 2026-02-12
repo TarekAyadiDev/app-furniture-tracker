@@ -44,6 +44,29 @@ async function touchParent(parentType: AttachmentParentType, parentId: string) {
 
 type SignedUpload = { uploadUrl: string; publicUrl: string; key: string };
 
+function fileExt(name: string | null | undefined): string {
+  const value = String(name || "").trim().toLowerCase();
+  const idx = value.lastIndexOf(".");
+  if (idx <= -1 || idx === value.length - 1) return "";
+  return value.slice(idx + 1);
+}
+
+function inferContentType(name: string | null | undefined): string | null {
+  const ext = fileExt(name);
+  if (!ext) return null;
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "png") return "image/png";
+  if (ext === "gif") return "image/gif";
+  if (ext === "webp") return "image/webp";
+  if (ext === "bmp") return "image/bmp";
+  if (ext === "svg") return "image/svg+xml";
+  if (ext === "heic") return "image/heic";
+  if (ext === "heif") return "image/heif";
+  if (ext === "avif") return "image/avif";
+  return null;
+}
+
 async function signUpload(params: {
   contentType: string;
   fileName: string;
@@ -69,24 +92,35 @@ async function signUpload(params: {
 }
 
 async function uploadToS3(blob: Blob, opts: { name?: string | null; parentType: AttachmentParentType; parentId: string }) {
-  const contentType = blob.type || "application/octet-stream";
-  const fileName = opts.name?.trim() || "photo";
-  const signed = await signUpload({
-    contentType,
-    fileName,
-    parentType: opts.parentType,
-    parentId: opts.parentId,
-  });
-  const putRes = await fetch(signed.uploadUrl, {
-    method: "PUT",
-    headers: { "Content-Type": contentType },
-    body: blob,
-  });
-  if (!putRes.ok) {
-    const errText = await putRes.text().catch(() => "");
-    throw new Error(errText ? `Upload failed (${putRes.status}): ${errText}` : `Upload failed (${putRes.status})`);
+  const fileName = opts.name?.trim() || "attachment";
+  const contentType = blob.type || inferContentType(fileName) || "application/octet-stream";
+
+  const attempt = async (parentType: AttachmentParentType) => {
+    const signed = await signUpload({
+      contentType,
+      fileName,
+      parentType,
+      parentId: opts.parentId,
+    });
+    const putRes = await fetch(signed.uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": contentType },
+      body: blob,
+    });
+    if (!putRes.ok) {
+      const errText = await putRes.text().catch(() => "");
+      throw new Error(errText ? `Upload failed (${putRes.status}): ${errText}` : `Upload failed (${putRes.status})`);
+    }
+    return signed.publicUrl;
+  };
+
+  try {
+    return await attempt(opts.parentType);
+  } catch (err) {
+    // Some buckets enforce prefix-level permissions; retry sub-item receipts under item-style prefix.
+    if (opts.parentType === "subItem") return await attempt("item");
+    throw err;
   }
-  return signed.publicUrl;
 }
 
 export async function listAttachments(parentType: AttachmentParentType, parentId: string): Promise<AttachmentRecord[]> {

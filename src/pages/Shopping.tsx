@@ -4,10 +4,9 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
-import { type ItemStatus, type RoomId } from "@/lib/domain";
+import { inferItemKind, type ItemKind, type ItemStatus, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
 import { storeKey } from "@/lib/storePricing";
@@ -46,6 +45,7 @@ export default function Shopping() {
 
   const [name, setName] = useState("");
   const [room, setRoom] = useState<RoomId>(() => loadRecents(RECENT_ROOMS_KEY)[0] || "Living");
+  const [kind, setKind] = useState<ItemKind>("placeholder");
   const [status, setStatus] = useState<ItemStatus>("Shortlist");
   const [price, setPrice] = useState<string>("");
   const [store, setStore] = useState<string>("");
@@ -81,14 +81,16 @@ export default function Shopping() {
       return;
     }
 
+    const isPlaceholder = kind === "placeholder";
     const parsedPrice = parseNumberOrNull(price);
 
     const id = await createItem({
       name: trimmed,
       room,
+      kind,
       status,
-      price: parsedPrice,
-      store: store.trim() || null,
+      price: isPlaceholder ? null : parsedPrice,
+      store: isPlaceholder ? null : store.trim() || null,
       notes: notes.trim() || null,
       qty: 1,
       category: "Other",
@@ -102,7 +104,10 @@ export default function Shopping() {
     setNotes("");
     nameRef.current?.focus();
 
-    toast({ title: "Added", description: `${trimmed} \u00b7 ${roomNameById.get(room) || room} \u00b7 ${status}` });
+    toast({
+      title: kind === "placeholder" ? "Placeholder added" : "Item added",
+      description: `${trimmed} \u00b7 ${roomNameById.get(room) || room} \u00b7 ${status}`,
+    });
 
     if (openAfter) nav(`/items/${id}`);
   }
@@ -126,6 +131,37 @@ export default function Shopping() {
             />
           </div>
 
+          <div className="space-y-2">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Type</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setKind("placeholder")}
+                className={[
+                  "rounded-full border px-3 py-2 text-sm font-medium",
+                  kind === "placeholder" ? "border-foreground bg-foreground text-background" : "bg-background text-foreground",
+                ].join(" ")}
+              >
+                Placeholder item
+              </button>
+              <button
+                type="button"
+                onClick={() => setKind("standalone")}
+                className={[
+                  "rounded-full border px-3 py-2 text-sm font-medium",
+                  kind === "standalone" ? "border-foreground bg-foreground text-background" : "bg-background text-foreground",
+                ].join(" ")}
+              >
+                Standalone item
+              </button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {kind === "placeholder"
+                ? "Use this as a container for variations/options in the Items tab."
+                : "Use this for a specific buyable variation."}
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <label htmlFor="shop_room" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
@@ -142,20 +178,26 @@ export default function Shopping() {
                 ))}
               </select>
             </div>
-            <div className="space-y-1.5">
-              <label htmlFor="shop_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <Input
-                  id="shop_price"
-                  inputMode="decimal"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="0"
-                  className="h-12 rounded-xl pl-7 text-base focus:ring-2 focus:ring-ring"
-                />
+            {kind === "standalone" ? (
+              <div className="space-y-1.5">
+                <label htmlFor="shop_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                  <Input
+                    id="shop_price"
+                    inputMode="decimal"
+                    value={price}
+                    onChange={(e) => setPrice(e.target.value)}
+                    placeholder="0"
+                    className="h-12 rounded-xl pl-7 text-base focus:ring-2 focus:ring-ring"
+                  />
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="space-y-1.5 rounded-xl border border-dashed px-3 py-2 text-xs text-muted-foreground">
+                Placeholder pricing is managed on selected variations.
+              </div>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -167,22 +209,24 @@ export default function Shopping() {
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <label htmlFor="shop_store" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Store (optional)</label>
-            <select
-              id="shop_store"
-              value={store}
-              onChange={(e) => setStore(e.target.value)}
-              className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">(none)</option>
-              {orderedStores.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          {kind === "standalone" ? (
+            <div className="space-y-1.5">
+              <label htmlFor="shop_store" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Store (optional)</label>
+              <select
+                id="shop_store"
+                value={store}
+                onChange={(e) => setStore(e.target.value)}
+                className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">(none)</option>
+                {orderedStores.map((s) => (
+                  <option key={s.id} value={s.name}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
 
           <div className="space-y-1.5">
             <label htmlFor="shop_notes" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</label>
@@ -215,10 +259,10 @@ export default function Shopping() {
 
           <div className="grid grid-cols-2 gap-3 pt-2">
             <Button className="h-12 rounded-xl text-base shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98]" onClick={() => onAdd(false)}>
-              Add Item
+              {kind === "placeholder" ? "Add Placeholder" : "Add Item"}
             </Button>
             <Button variant="secondary" className="h-12 rounded-xl text-base transition-all duration-150 active:scale-[0.98]" onClick={() => onAdd(true)}>
-              Add & Edit
+              {kind === "placeholder" ? "Add Placeholder & Edit" : "Add & Edit"}
             </Button>
           </div>
         </div>
@@ -248,6 +292,7 @@ export default function Shopping() {
                     <div className="truncate font-body text-base font-semibold text-card-foreground">{it.name}</div>
                     <div className="mt-1 truncate text-xs text-muted-foreground">
                       {roomNameById.get(it.room) || it.room}
+                      {inferItemKind(it) === "placeholder" ? " · placeholder" : ""}
                       {it.store ? ` · ${it.store}` : ""}
                       {it.price ? ` · ${formatMoneyUSD(it.price)}` : ""}
                     </div>

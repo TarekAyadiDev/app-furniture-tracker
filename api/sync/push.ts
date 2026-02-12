@@ -184,6 +184,7 @@ export default async function handler(req: any, res: any) {
 
       const meta = {
         category: it.category || "Other",
+        kind: it.kind === "placeholder" ? "placeholder" : "standalone",
         dimensions: it.dimensions || null,
         sort: typeof it.sort === "number" ? it.sort : null,
         specs: it.specs || null,

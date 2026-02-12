@@ -124,6 +124,7 @@ export default async function handler(req: any, res: any) {
           room: normalizeRoom(firstString(f["Room"]) || f["Room"]),
           category: String(meta?.category || f["Category"] || "Other").trim() || "Other",
           status: normalizeStatus(f["Status"]),
+          kind: meta?.kind === "placeholder" ? "placeholder" : "standalone",
           sort: toNumber(meta?.sort),
           price: toNumber(f["Price"]),
           selectedOptionId: firstRecordId(f["Selected Option Id"]),

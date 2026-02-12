@@ -22,6 +22,31 @@ export const ITEM_STATUSES = [
 
 export type ItemStatus = (typeof ITEM_STATUSES)[number];
 
+export const ITEM_KINDS = ["standalone", "placeholder"] as const;
+
+export type ItemKind = (typeof ITEM_KINDS)[number];
+
+export function normalizeItemKind(value: unknown): ItemKind {
+  return value === "placeholder" ? "placeholder" : "standalone";
+}
+
+export function inferItemKind(
+  input: {
+    kind?: unknown;
+    name?: unknown;
+    selectedOptionId?: unknown;
+  } | null | undefined,
+  hasOptions = false,
+): ItemKind {
+  if (input?.kind === "placeholder") return "placeholder";
+  if (input?.kind === "standalone") return "standalone";
+  if (typeof input?.selectedOptionId === "string" && input.selectedOptionId.trim()) return "placeholder";
+  if (hasOptions) return "placeholder";
+  const name = String(input?.name || "").trim().toLowerCase();
+  if (name.includes("placeholder")) return "placeholder";
+  return "standalone";
+}
+
 export type EntityType = "item" | "option" | "subItem" | "measurement" | "room" | "store";
 
 export type SyncState = "clean" | "dirty" | "deleted";
@@ -71,6 +96,7 @@ export type Item = {
   room: RoomId;
   category: string;
   status: ItemStatus;
+  kind?: ItemKind;
   selectedOptionId?: string | null;
   // Manual ordering within a room (lower comes first).
   sort?: number | null;
@@ -132,8 +158,10 @@ export type SubItem = {
   optionId: string;
   title: string;
   sort?: number | null;
+  qty?: number;
   price?: number | null;
   taxEstimate?: number | null;
+  discountType?: "amount" | "percent" | null;
   discountValue?: number | null;
   extraWarrantyCost?: number | null;
   notes?: string | null;
