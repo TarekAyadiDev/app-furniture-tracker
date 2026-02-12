@@ -689,7 +689,9 @@ export default function Items() {
                             className={[
                               "p-3 transition-colors",
                               isDropTarget ? "border-primary/70 bg-primary/5" : "",
-                              selectionLabel ? "border-primary/20 bg-secondary/30" : "",
+                              isPlaceholder
+                                ? "border-emerald-300/60 bg-emerald-50/50"
+                                : selectionLabel ? "border-primary/20 bg-secondary/30" : "",
                             ].join(" ")}
                           >
                             <div className="flex items-start gap-3">
@@ -723,7 +725,7 @@ export default function Items() {
                                         variant="outline"
                                         className={
                                           isPlaceholder
-                                            ? "border border-amber-300 bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-amber-900 shadow-sm hover:bg-amber-100"
+                                            ? "border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-emerald-900 shadow-sm hover:bg-emerald-100"
                                             : "border border-slate-300/90 bg-gradient-to-r from-slate-100 to-zinc-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-slate-700 shadow-sm hover:from-slate-100 hover:to-zinc-100"
                                         }
                                       >
@@ -906,7 +908,7 @@ export default function Items() {
                                             "flex flex-wrap items-center gap-3 rounded-xl border p-2.5 sm:p-3",
                                             isSelected
                                               ? "border-sky-300/90 bg-gradient-to-r from-sky-50/95 to-cyan-50/70 ring-1 ring-sky-200/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]"
-                                              : "border-border/60 bg-background/70",
+                                              : "border-slate-300 bg-slate-100/80",
                                           ].join(" ")}
                                         >
                                           <OptionPhotoStrip optionId={opt.id} />
@@ -949,27 +951,27 @@ export default function Items() {
                                                 View
                                               </a>
                                             ) : null}
-                                          <Link
-                                            to={`/items/${it.id}?option=${encodeURIComponent(opt.id)}`}
-                                            className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                                            onClick={(e) => e.stopPropagation()}
-                                          >
-                                            Edit
-                                          </Link>
-                                          <Button
-                                            size="sm"
-                                            variant="secondary"
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              void onDuplicateOptionForItem(it, opt, itemOpts);
-                                            }}
-                                          >
-                                            Duplicate
-                                          </Button>
+                                            <Link
+                                              to={`/items/${it.id}?option=${encodeURIComponent(opt.id)}`}
+                                              className="inline-flex h-8 items-center justify-center rounded-lg border border-input bg-background px-3 text-xs font-medium shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                              onClick={(e) => e.stopPropagation()}
+                                            >
+                                              Edit
+                                            </Link>
+                                            <Button
+                                              size="sm"
+                                              variant="secondary"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                void onDuplicateOptionForItem(it, opt, itemOpts);
+                                              }}
+                                            >
+                                              Duplicate
+                                            </Button>
+                                          </div>
                                         </div>
-                                      </div>
-                                    );
-                                  })}
+                                      );
+                                    })}
                                   </div>
                                 )}
 
