@@ -531,6 +531,10 @@ export default function Items() {
     for (const r of orderedRooms) {
       const list = map.get(r.id) || [];
       list.sort((a, b) => {
+        const ka = inferItemKind(a, hasOptionsByItem.has(a.id)) === "standalone" ? 0 : 1;
+        const kb = inferItemKind(b, hasOptionsByItem.has(b.id)) === "standalone" ? 0 : 1;
+        if (ka !== kb) return ka - kb;
+
         const sa = typeof a.sort === "number" ? a.sort : 999999;
         const sb = typeof b.sort === "number" ? b.sort : 999999;
         if (sa !== sb) return sa - sb;
@@ -542,7 +546,7 @@ export default function Items() {
       map.set(r.id, list);
     }
     return map;
-  }, [filtered, orderedRooms]);
+  }, [filtered, orderedRooms, hasOptionsByItem]);
 
   useEffect(() => {
     saveItemsUiState({ openRooms, openItemOptions });
