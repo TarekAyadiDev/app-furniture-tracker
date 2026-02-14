@@ -369,6 +369,29 @@ export default function Items() {
     }
   }
 
+  async function onAddPlaceholderForRoom(roomId: RoomId) {
+    const title = prompt("Placeholder name")?.trim();
+    if (!title) return;
+    try {
+      const id = await createItem({
+        name: title,
+        room: roomId,
+        kind: "placeholder",
+        status: "Idea",
+        category: "Other",
+        qty: 1,
+        price: null,
+        store: null,
+        notes: null,
+      });
+      if (!openRooms.includes(roomId)) setOpenRooms((cur) => [...cur, roomId]);
+      setOpenItemOptions((cur) => ({ ...cur, [id]: true }));
+      toast({ title: "Placeholder added", description: `${title} · ${roomNameById.get(roomId) || roomId}` });
+    } catch (err: any) {
+      toast({ title: "Could not add placeholder", description: err?.message || "Try again." });
+    }
+  }
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -651,7 +674,6 @@ export default function Items() {
       <Accordion type="multiple" className="space-y-3" value={openRooms} onValueChange={(v) => setOpenRooms(v as string[])}>
         {orderedRoomIds.map((r) => {
           const group = byRoom.get(r) || [];
-          if (!group.length) return null;
           const openReorder = reorderRoomId === r;
           return (
             <AccordionItem key={r} value={r} className="rounded-2xl border border-border bg-card px-4 shadow-sm">
@@ -664,19 +686,25 @@ export default function Items() {
               <AccordionContent>
                 <div className="space-y-3">
                   {openReorder ? (
-                    <DragReorderList
-                      ariaLabel={`Reorder items in ${r}`}
-                      items={group.map((it) => ({
-                        id: it.id,
-                        title: it.name,
-                        subtitle: it.category || "Other",
-                        right: it.priority ? <span className="text-xs text-muted-foreground">P{it.priority}</span> : null,
-                      }))}
-                      onCommit={async (ids) => {
-                        await reorderItems(r, ids);
-                      }}
-                    />
-                  ) : (
+                    group.length ? (
+                      <DragReorderList
+                        ariaLabel={`Reorder items in ${r}`}
+                        items={group.map((it) => ({
+                          id: it.id,
+                          title: it.name,
+                          subtitle: it.category || "Other",
+                          right: it.priority ? <span className="text-xs text-muted-foreground">P{it.priority}</span> : null,
+                        }))}
+                        onCommit={async (ids) => {
+                          await reorderItems(r, ids);
+                        }}
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">
+                        No items in this room yet.
+                      </div>
+                    )
+                  ) : group.length ? (
                     <div className="space-y-2">
                       {group.map((it) => {
                         const itemOpts = optionsByItem.get(it.id) || [];
@@ -1032,12 +1060,25 @@ export default function Items() {
                         );
                       })}
                     </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed px-3 py-3 text-sm text-muted-foreground">
+                      No items in this room yet.
+                    </div>
                   )}
 
-                  <div className="pt-1">
+                  <div className="grid grid-cols-2 gap-3 pt-1">
+                    <Button
+                      variant="secondary"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        void onAddPlaceholderForRoom(r);
+                      }}
+                    >
+                      Add placeholder
+                    </Button>
                     <Button
                       variant={openReorder ? "default" : "secondary"}
-                      className="w-full"
+                      disabled={group.length < 2}
                       onClick={(e) => {
                         e.preventDefault();
                         setReorderRoomId((cur) => (cur === r ? null : r));

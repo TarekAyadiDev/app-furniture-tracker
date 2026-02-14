@@ -232,18 +232,47 @@ function extractPriceFromOffers(offers: unknown): number | null {
   return parsePrice(offers);
 }
 
-function extractFirstPriceFromHtml(html: string): number | null {
-  const patterns = [
-    /"price"\s*:\s*"?([0-9]+(?:\.[0-9]{1,2})?)"?/i,
-    /\$([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]{2})?)/,
-  ];
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
+function collectRegexPrices(html: string, pattern: RegExp): number[] {
+  const prices: number[] = [];
+  const regex = new RegExp(pattern.source, pattern.flags);
+  let match: RegExpExecArray | null = null;
+  while ((match = regex.exec(html))) {
     if (!match?.[1]) continue;
     const parsed = parsePrice(match[1]);
-    if (parsed !== null) return parsed;
+    if (parsed !== null) prices.push(parsed);
+  }
+  return prices;
+}
+
+function firstPriceFromPatterns(html: string, patterns: RegExp[]): number | null {
+  for (const pattern of patterns) {
+    const candidates = collectRegexPrices(html, pattern);
+    if (!candidates.length) continue;
+    return candidates[0];
   }
   return null;
+}
+
+function extractPriceFromHtmlSignals(html: string): number | null {
+  // High-confidence price markers used by Amazon and common storefront scripts.
+  const strongPatterns = [
+    /"priceToPay"\s*:\s*\{[\s\S]{0,220}?"price"\s*:\s*"?([0-9]+(?:\.[0-9]{1,2})?)"?/gi,
+    /"priceAmount"\s*:\s*"?([0-9]+(?:\.[0-9]{1,2})?)"?/gi,
+    /"currentPrice"\s*:\s*"?\$?([0-9][0-9,]*(?:\.[0-9]{1,2})?)"?/gi,
+    /"salePrice"\s*:\s*"?\$?([0-9][0-9,]*(?:\.[0-9]{1,2})?)"?/gi,
+    /"ourPrice"\s*:\s*"?\$?([0-9][0-9,]*(?:\.[0-9]{1,2})?)"?/gi,
+    /"listPrice"\s*:\s*"?\$?([0-9][0-9,]*(?:\.[0-9]{1,2})?)"?/gi,
+    /<span[^>]*class=["'][^"']*a-offscreen[^"']*["'][^>]*>\s*\$([0-9][0-9,]*(?:\.[0-9]{2})?)\s*<\/span>/gi,
+  ];
+  const strong = firstPriceFromPatterns(html, strongPatterns);
+  if (strong !== null) return strong;
+
+  // Safer generic JSON fallback (requires explicit currency context).
+  const guardedPatterns = [
+    /"price"\s*:\s*"?([0-9]+(?:\.[0-9]{1,2})?)"?\s*,\s*"priceCurrency"\s*:\s*"[A-Z]{3}"/gi,
+    /"priceCurrency"\s*:\s*"[A-Z]{3}"\s*,\s*"price"\s*:\s*"?([0-9]+(?:\.[0-9]{1,2})?)"?/gi,
+  ];
+  return firstPriceFromPatterns(html, guardedPatterns);
 }
 
 function bestLdProduct(products: Record<string, any>[]): Record<string, any> | null {
@@ -285,7 +314,7 @@ function extractProduct(html: string, sourceUrl: string): ParsedProduct | null {
     parsePrice(getMeta(meta, "product:price:amount", "og:price:amount", "price", "itemprop:price")) ??
     extractPriceFromOffers(ld?.offers) ??
     parsePrice(ld?.price) ??
-    extractFirstPriceFromHtml(html);
+    extractPriceFromHtmlSignals(html);
 
   const extractedFieldCount = [name, description, imageUrl, brand, price].filter((value) => value !== null).length;
   if (extractedFieldCount === 0) return null;
