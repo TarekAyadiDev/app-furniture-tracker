@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Furniture Tracker Clipper",
+  "version": "0.1.0",
+  "description": "One-click clipper for product pages into app-furniture-tracker.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Clip to Furniture Tracker",
+    "default_popup": "popup.html"
+  }
+}

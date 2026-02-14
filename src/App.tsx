@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Shopping from "@/pages/Shopping";
 import Items from "@/pages/Items";
 import ItemDetail from "@/pages/ItemDetail";
+import ClipOpen from "@/pages/ClipOpen";
 import Rooms from "@/pages/Rooms";
 import RoomDetail from "@/pages/RoomDetail";
 import Budget from "@/pages/Budget";
@@ -33,6 +34,7 @@ const App = () => (
                 <Route path="shopping" element={<Shopping />} />
                 <Route path="items" element={<Items />} />
                 <Route path="items/:id" element={<ItemDetail />} />
+                <Route path="clip/open/:id" element={<ClipOpen />} />
                 <Route path="rooms" element={<Rooms />} />
                 <Route path="rooms/:id" element={<RoomDetail />} />
                 <Route path="review" element={<Review />} />

@@ -6,12 +6,53 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
-import { inferItemKind, type ItemStatus, type RoomId } from "@/lib/domain";
+import { inferItemKind, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
-import { storeKey } from "@/lib/storePricing";
 
 const RECENT_ROOMS_KEY = "ft_recentRooms";
+
+type CaptureSpec = { key: string; value: string };
+
+type ExtractResponse = {
+  ok: boolean;
+  data?: {
+    name?: string | null;
+    price?: number | null;
+    description?: string | null;
+    imageUrl?: string | null;
+    brand?: string | null;
+    sourceUrl?: string | null;
+    sourceDomain?: string | null;
+    currency?: string | null;
+    originalPrice?: number | null;
+    discountPercent?: number | null;
+    dimensionsText?: string | null;
+    variantText?: string | null;
+    specs?: CaptureSpec[] | null;
+    raw?: unknown;
+    captureMethod?: "fallback_scraper" | "browser";
+  };
+  message?: string;
+};
+
+type StandaloneDraft = {
+  name: string;
+  room: RoomId;
+  price: number | null;
+  description: string | null;
+  link: string | null;
+  brand: string | null;
+  imageUrl: string | null;
+  currency: string | null;
+  sourceDomain: string | null;
+  originalPrice: number | null;
+  discountPercent: number | null;
+  dimensionsText: string | null;
+  variantText: string | null;
+  specs: CaptureSpec[];
+  captureMethod: "fallback_scraper" | "browser" | "manual";
+};
 
 function loadRecents(key: string): string[] {
   try {
@@ -32,40 +73,25 @@ function pushRecent(key: string, value: string, max = 6) {
   localStorage.setItem(key, JSON.stringify(next));
 }
 
-type ExtractResponse = {
-  ok: boolean;
-  data?: {
-    name?: string | null;
-    price?: number | null;
-    description?: string | null;
-    imageUrl?: string | null;
-    brand?: string | null;
-    sourceUrl?: string | null;
-  };
-  message?: string;
-};
+function normalizeText(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
 
-type StandaloneDraft = {
-  name: string;
-  room: RoomId;
-  status: ItemStatus;
-  price: number | null;
-  qty: number;
-  store: string | null;
-  description: string | null;
-  link: string | null;
-  brand: string | null;
-  imageUrl: string | null;
-};
+function sourceDomainFromUrl(value: string): string {
+  try {
+    return new URL(value).hostname.replace(/^www\./i, "");
+  } catch {
+    return "";
+  }
+}
 
 export default function Shopping() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, orderedStores, createItem } = useData();
+  const { orderedRooms, roomNameById, items, createItem } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
   const validRoomIds = useMemo(() => new Set(orderedRoomIds), [orderedRoomIds]);
-  const validStoreKeys = useMemo(() => new Set(orderedStores.map((s) => storeKey(s.name))), [orderedStores]);
 
   const captureNameRef = useRef<HTMLInputElement | null>(null);
   const quickNameRef = useRef<HTMLInputElement | null>(null);
@@ -75,13 +101,19 @@ export default function Shopping() {
 
   const [captureName, setCaptureName] = useState("");
   const [captureRoom, setCaptureRoom] = useState<RoomId>(() => loadRecents(RECENT_ROOMS_KEY)[0] || "Living");
-  const [captureStatus, setCaptureStatus] = useState<ItemStatus>("Shortlist");
   const [capturePrice, setCapturePrice] = useState("");
-  const [captureQty, setCaptureQty] = useState("1");
-  const [captureStore, setCaptureStore] = useState("");
   const [captureBrand, setCaptureBrand] = useState("");
   const [captureDescription, setCaptureDescription] = useState("");
   const [captureImageUrl, setCaptureImageUrl] = useState("");
+  const [captureCurrency, setCaptureCurrency] = useState("");
+  const [captureOriginalPrice, setCaptureOriginalPrice] = useState("");
+  const [captureDiscountPercent, setCaptureDiscountPercent] = useState("");
+  const [captureDimensionsText, setCaptureDimensionsText] = useState("");
+  const [captureVariantText, setCaptureVariantText] = useState("");
+  const [captureSourceDomain, setCaptureSourceDomain] = useState("");
+  const [captureSpecs, setCaptureSpecs] = useState<CaptureSpec[]>([]);
+  const [captureMethod, setCaptureMethod] = useState<"fallback_scraper" | "browser" | "manual">("manual");
+  const [hasExtracted, setHasExtracted] = useState(false);
 
   const [quickName, setQuickName] = useState("");
   const [quickRoom, setQuickRoom] = useState<RoomId>(() => loadRecents(RECENT_ROOMS_KEY)[0] || "Living");
@@ -96,14 +128,6 @@ export default function Shopping() {
     setRecentRooms(loadRecents(RECENT_ROOMS_KEY).filter((r) => validRoomIds.has(r)));
   }, [orderedRoomIds, validRoomIds]);
 
-  useEffect(() => {
-    if (!orderedStores.length) {
-      setCaptureStore("");
-      return;
-    }
-    setCaptureStore((cur) => (validStoreKeys.has(storeKey(cur)) ? cur : ""));
-  }, [orderedStores, validStoreKeys]);
-
   const recentItems = useMemo(() => {
     return [...items]
       .filter((i) => i.syncState !== "deleted")
@@ -111,27 +135,51 @@ export default function Shopping() {
       .slice(0, 8);
   }, [items]);
 
+  const captureWeakFields = useMemo(() => {
+    const weak: string[] = [];
+    if (!parseNumberOrNull(capturePrice)) weak.push("price");
+    if (!normalizeText(captureImageUrl)) weak.push("image");
+    if (!normalizeText(captureBrand)) weak.push("brand");
+    if (!normalizeText(captureDescription)) weak.push("description");
+    return weak;
+  }, [capturePrice, captureImageUrl, captureBrand, captureDescription]);
+
   function rememberRoom(room: RoomId) {
     pushRecent(RECENT_ROOMS_KEY, room);
     setRecentRooms(loadRecents(RECENT_ROOMS_KEY).filter((r) => validRoomIds.has(r)));
   }
 
   async function createStandaloneFromDraft(draft: StandaloneDraft) {
-    const specs: Record<string, string | number | boolean | null> = {};
-    if (draft.brand) specs.brand = draft.brand;
-    if (draft.imageUrl) specs.imageUrl = draft.imageUrl;
+    const specsMap: Record<string, string | number | boolean | null> = {};
+
+    for (const entry of draft.specs) {
+      const key = normalizeText(entry.key);
+      const value = normalizeText(entry.value);
+      if (!key || !value) continue;
+      if (specsMap[key] == null) specsMap[key] = value;
+    }
+
+    if (draft.brand) specsMap.brand = draft.brand;
+    if (draft.imageUrl) specsMap.imageUrl = draft.imageUrl;
+    if (draft.currency) specsMap.currency = draft.currency;
+    if (draft.sourceDomain) specsMap.sourceDomain = draft.sourceDomain;
+    if (draft.originalPrice !== null) specsMap.originalPrice = draft.originalPrice;
+    if (draft.discountPercent !== null) specsMap.discountPercent = draft.discountPercent;
+    if (draft.dimensionsText) specsMap.dimensionsText = draft.dimensionsText;
+    if (draft.variantText) specsMap.variantText = draft.variantText;
+    specsMap.captureMethod = draft.captureMethod;
 
     return await createItem({
       name: draft.name,
       room: draft.room,
       kind: "standalone",
-      status: draft.status,
+      status: "Shortlist",
       price: draft.price,
-      store: draft.store,
+      store: null,
       notes: draft.description,
-      qty: draft.qty,
+      qty: 1,
       link: draft.link,
-      specs: Object.keys(specs).length ? specs : null,
+      specs: Object.keys(specsMap).length ? specsMap : null,
       category: "Other",
     });
   }
@@ -159,29 +207,48 @@ export default function Shopping() {
         throw new Error(json?.message || `Extraction failed (${res.status})`);
       }
 
-      const extractedName = String(json.data.name || "").trim() || "New Item";
+      const extractedUrl = normalizeText(json.data.sourceUrl || target);
+      const extractedName = normalizeText(json.data.name) || "New Item";
       const extractedPrice = typeof json.data.price === "number" && Number.isFinite(json.data.price) ? json.data.price : null;
-      const extractedBrand = String(json.data.brand || "").trim();
-      const extractedDescription = String(json.data.description || "").trim();
-      const extractedImage = String(json.data.imageUrl || "").trim();
-      const extractedUrl = String(json.data.sourceUrl || target).trim();
+      const extractedBrand = normalizeText(json.data.brand);
+      const extractedDescription = normalizeText(json.data.description);
+      const extractedImage = normalizeText(json.data.imageUrl);
+      const extractedCurrency = normalizeText(json.data.currency);
+      const extractedOriginalPrice =
+        typeof json.data.originalPrice === "number" && Number.isFinite(json.data.originalPrice) ? json.data.originalPrice : null;
+      const extractedDiscount =
+        typeof json.data.discountPercent === "number" && Number.isFinite(json.data.discountPercent)
+          ? json.data.discountPercent
+          : null;
 
       setCaptureName(extractedName);
       setCapturePrice(extractedPrice === null ? "" : String(extractedPrice));
       setCaptureBrand(extractedBrand);
       setCaptureDescription(extractedDescription);
       setCaptureImageUrl(extractedImage);
-      setProductUrl(extractedUrl);
+      setCaptureCurrency(extractedCurrency);
+      setCaptureOriginalPrice(extractedOriginalPrice === null ? "" : String(extractedOriginalPrice));
+      setCaptureDiscountPercent(extractedDiscount === null ? "" : String(extractedDiscount));
+      setCaptureDimensionsText(normalizeText(json.data.dimensionsText));
+      setCaptureVariantText(normalizeText(json.data.variantText));
+      setCaptureSourceDomain(normalizeText(json.data.sourceDomain) || sourceDomainFromUrl(extractedUrl));
+      setCaptureSpecs(Array.isArray(json.data.specs) ? json.data.specs.filter((s) => normalizeText(s?.key) && normalizeText(s?.value)) : []);
+      setCaptureMethod(json.data.captureMethod === "browser" ? "browser" : "fallback_scraper");
+      setHasExtracted(true);
+      setProductUrl(extractedUrl || target);
 
       toast({
         title: "Product extracted",
-        description: "Review any field and add when ready.",
+        description: "Review highlighted weak fields, adjust if needed, then add.",
       });
     } catch (err: any) {
+      if (!captureName.trim()) setCaptureName("New Item");
+      setProductUrl(target);
+      setHasExtracted(false);
       toast({
         variant: "destructive",
         title: "Extraction failed",
-        description: err?.message || "Could not extract product details from that URL.",
+        description: err?.message || "Could not extract product details from that URL. You can continue manually.",
       });
     } finally {
       setIsExtracting(false);
@@ -195,25 +262,25 @@ export default function Shopping() {
       return;
     }
 
-    const parsedPrice = parseNumberOrNull(capturePrice);
-    const parsedQty = Math.max(1, Math.round(parseNumberOrNull(captureQty) ?? 1));
-    const trimmedStore = captureStore.trim() || null;
-    const trimmedBrand = captureBrand.trim() || null;
-    const trimmedImageUrl = captureImageUrl.trim() || null;
-    const trimmedDescription = captureDescription.trim() || null;
     const trimmedUrl = productUrl.trim() || null;
+    const sourceDomain = normalizeText(captureSourceDomain) || sourceDomainFromUrl(trimmedUrl || "");
 
     const id = await createStandaloneFromDraft({
       name: trimmedName,
       room: captureRoom,
-      status: captureStatus,
-      price: parsedPrice,
-      qty: parsedQty,
-      store: trimmedStore,
-      description: trimmedDescription,
+      price: parseNumberOrNull(capturePrice),
+      description: captureDescription.trim() || null,
       link: trimmedUrl,
-      brand: trimmedBrand,
-      imageUrl: trimmedImageUrl,
+      brand: captureBrand.trim() || null,
+      imageUrl: captureImageUrl.trim() || null,
+      currency: captureCurrency.trim() || null,
+      sourceDomain: sourceDomain || null,
+      originalPrice: parseNumberOrNull(captureOriginalPrice),
+      discountPercent: parseNumberOrNull(captureDiscountPercent),
+      dimensionsText: captureDimensionsText.trim() || null,
+      variantText: captureVariantText.trim() || null,
+      specs: captureSpecs,
+      captureMethod: captureMethod,
     });
 
     rememberRoom(captureRoom);
@@ -221,16 +288,23 @@ export default function Shopping() {
     setProductUrl("");
     setCaptureName("");
     setCapturePrice("");
-    setCaptureQty("1");
-    setCaptureStore("");
     setCaptureBrand("");
     setCaptureDescription("");
     setCaptureImageUrl("");
+    setCaptureCurrency("");
+    setCaptureOriginalPrice("");
+    setCaptureDiscountPercent("");
+    setCaptureDimensionsText("");
+    setCaptureVariantText("");
+    setCaptureSourceDomain("");
+    setCaptureSpecs([]);
+    setCaptureMethod("manual");
+    setHasExtracted(false);
     captureNameRef.current?.focus();
 
     toast({
       title: "Item added",
-      description: `${trimmedName} \u00b7 ${roomNameById.get(captureRoom) || captureRoom} \u00b7 ${captureStatus}`,
+      description: `${trimmedName} · ${roomNameById.get(captureRoom) || captureRoom}`,
     });
 
     if (openAfter) nav(`/items/${id}`);
@@ -243,18 +317,22 @@ export default function Shopping() {
       return;
     }
 
-    const trimmedDescription = quickDescription.trim() || null;
     await createStandaloneFromDraft({
       name: trimmedName,
       room: quickRoom,
-      status: "Shortlist",
       price: null,
-      qty: 1,
-      store: null,
-      description: trimmedDescription,
+      description: quickDescription.trim() || null,
       link: null,
       brand: null,
       imageUrl: null,
+      currency: null,
+      sourceDomain: null,
+      originalPrice: null,
+      discountPercent: null,
+      dimensionsText: null,
+      variantText: null,
+      specs: [],
+      captureMethod: "manual",
     });
 
     rememberRoom(quickRoom);
@@ -264,196 +342,12 @@ export default function Shopping() {
 
     toast({
       title: "Item added",
-      description: `${trimmedName} \u00b7 ${roomNameById.get(quickRoom) || quickRoom}`,
+      description: `${trimmedName} · ${roomNameById.get(quickRoom) || quickRoom}`,
     });
   }
 
   return (
     <div className="space-y-5">
-      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
-        <div className="space-y-4">
-          <div>
-            <h2 className="font-heading text-lg font-semibold text-foreground">Capture From URL</h2>
-            <p className="text-xs text-muted-foreground">Extract first, edit fast, then add.</p>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="shop_product_url" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Product URL
-            </label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                id="shop_product_url"
-                value={productUrl}
-                onChange={(e) => setProductUrl(e.target.value)}
-                placeholder="https://www.amazon.com/... or any product page"
-                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-                autoComplete="off"
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                className="h-12 rounded-xl px-5"
-                onClick={() => void onExtract()}
-                disabled={isExtracting}
-              >
-                {isExtracting ? "Extracting..." : "Extract"}
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label htmlFor="capture_name" className="text-xs font-semibold uppercase tracking-widest text-primary">
-              Title
-            </label>
-            <Input
-              id="capture_name"
-              ref={captureNameRef}
-              value={captureName}
-              onChange={(e) => setCaptureName(e.target.value)}
-              placeholder="e.g. Queen mattress protector"
-              className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <label htmlFor="capture_room" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
-              <select
-                id="capture_room"
-                value={captureRoom}
-                onChange={(e) => setCaptureRoom(e.target.value as RoomId)}
-                className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                {orderedRoomIds.map((r) => (
-                  <option key={r} value={r}>
-                    {roomNameById.get(r) || r}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="capture_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <Input
-                  id="capture_price"
-                  inputMode="decimal"
-                  value={capturePrice}
-                  onChange={(e) => setCapturePrice(e.target.value)}
-                  placeholder="0"
-                  className="h-12 rounded-xl pl-7 text-base focus:ring-2 focus:ring-ring"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="capture_qty" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Quantity</label>
-              <Input
-                id="capture_qty"
-                inputMode="numeric"
-                value={captureQty}
-                onChange={(e) => setCaptureQty(e.target.value)}
-                placeholder="1"
-                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</label>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {(["Idea", "Shortlist", "Selected"] as ItemStatus[]).map((s) => (
-                <StatusBadge key={s} status={s} selected={captureStatus === s} onClick={() => setCaptureStatus(s)} />
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label htmlFor="capture_store" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Store (optional)</label>
-            <select
-              id="capture_store"
-              value={captureStore}
-              onChange={(e) => setCaptureStore(e.target.value)}
-              className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            >
-              <option value="">(none)</option>
-              {orderedStores.map((s) => (
-                <option key={s.id} value={s.name}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label htmlFor="capture_brand" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Brand</label>
-              <Input
-                id="capture_brand"
-                value={captureBrand}
-                onChange={(e) => setCaptureBrand(e.target.value)}
-                placeholder="e.g. Sealy"
-                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="capture_image_url" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Image URL</label>
-              <Input
-                id="capture_image_url"
-                value={captureImageUrl}
-                onChange={(e) => setCaptureImageUrl(e.target.value)}
-                placeholder="https://..."
-                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-                autoComplete="off"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label htmlFor="capture_description" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description</label>
-            <Textarea
-              id="capture_description"
-              value={captureDescription}
-              onChange={(e) => setCaptureDescription(e.target.value)}
-              placeholder="Material, size, color, delivery notes..."
-              className="min-h-[88px] resize-none rounded-xl text-base focus:ring-2 focus:ring-ring"
-            />
-          </div>
-
-          {recentRooms.length ? (
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent rooms</label>
-              <div className="flex flex-wrap gap-2">
-                {recentRooms.slice(0, 6).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => {
-                      setCaptureRoom(r as RoomId);
-                      setQuickRoom(r as RoomId);
-                    }}
-                    className="rounded-full border border-border bg-background px-3 py-2 text-sm transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-95"
-                  >
-                    {roomNameById.get(r as RoomId) || r}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <Button className="h-12 rounded-xl text-base shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98]" onClick={() => void onAddCaptured(false)}>
-              Add Item
-            </Button>
-            <Button variant="secondary" className="h-12 rounded-xl text-base transition-all duration-150 active:scale-[0.98]" onClick={() => void onAddCaptured(true)}>
-              Add & Edit
-            </Button>
-          </div>
-        </div>
-      </Card>
-
       <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
         <div className="space-y-4">
           <div>
@@ -508,6 +402,241 @@ export default function Shopping() {
           <Button className="h-12 w-full rounded-xl text-base shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98]" onClick={() => void onQuickAdd()}>
             Add Item
           </Button>
+        </div>
+      </Card>
+
+      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+        <div className="space-y-4">
+          <div>
+            <h2 className="font-heading text-lg font-semibold text-foreground">Capture From URL</h2>
+            <p className="text-xs text-muted-foreground">Extract, review weak fields, then add.</p>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="shop_product_url" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Product URL
+            </label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="shop_product_url"
+                value={productUrl}
+                onChange={(e) => setProductUrl(e.target.value)}
+                placeholder="https://www.amazon.com/... or any product page"
+                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
+                autoComplete="off"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-12 rounded-xl px-5"
+                onClick={() => void onExtract()}
+                disabled={isExtracting}
+              >
+                {isExtracting ? "Extracting..." : "Extract"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label htmlFor="capture_name" className="text-xs font-semibold uppercase tracking-widest text-primary">
+              Title
+            </label>
+            <Input
+              id="capture_name"
+              ref={captureNameRef}
+              value={captureName}
+              onChange={(e) => setCaptureName(e.target.value)}
+              placeholder="e.g. Queen mattress protector"
+              className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label htmlFor="capture_room" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
+              <select
+                id="capture_room"
+                value={captureRoom}
+                onChange={(e) => setCaptureRoom(e.target.value as RoomId)}
+                className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                {orderedRoomIds.map((r) => (
+                  <option key={r} value={r}>
+                    {roomNameById.get(r) || r}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="capture_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
+                <Input
+                  id="capture_price"
+                  inputMode="decimal"
+                  value={capturePrice}
+                  onChange={(e) => setCapturePrice(e.target.value)}
+                  placeholder="0"
+                  className="h-12 rounded-xl pl-7 text-base focus:ring-2 focus:ring-ring"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label htmlFor="capture_brand" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Brand</label>
+              <Input
+                id="capture_brand"
+                value={captureBrand}
+                onChange={(e) => setCaptureBrand(e.target.value)}
+                placeholder="e.g. Sealy"
+                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="capture_image_url" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Image URL</label>
+              <Input
+                id="capture_image_url"
+                value={captureImageUrl}
+                onChange={(e) => setCaptureImageUrl(e.target.value)}
+                placeholder="https://..."
+                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="capture_description" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description</label>
+            <Textarea
+              id="capture_description"
+              value={captureDescription}
+              onChange={(e) => setCaptureDescription(e.target.value)}
+              placeholder="Material, size, color, delivery notes..."
+              className="min-h-[88px] resize-none rounded-xl text-base focus:ring-2 focus:ring-ring"
+            />
+          </div>
+
+          <details className="rounded-xl border border-border bg-background/60 p-3">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Capture Fields</summary>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label htmlFor="capture_currency" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Currency</label>
+                <Input
+                  id="capture_currency"
+                  value={captureCurrency}
+                  onChange={(e) => setCaptureCurrency(e.target.value)}
+                  placeholder="USD"
+                  className="h-11 rounded-xl text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="capture_original_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Original Price</label>
+                <Input
+                  id="capture_original_price"
+                  value={captureOriginalPrice}
+                  onChange={(e) => setCaptureOriginalPrice(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0"
+                  className="h-11 rounded-xl text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="capture_discount_percent" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Discount %</label>
+                <Input
+                  id="capture_discount_percent"
+                  value={captureDiscountPercent}
+                  onChange={(e) => setCaptureDiscountPercent(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0"
+                  className="h-11 rounded-xl text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label htmlFor="capture_source_domain" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Source Domain</label>
+                <Input
+                  id="capture_source_domain"
+                  value={captureSourceDomain}
+                  onChange={(e) => setCaptureSourceDomain(e.target.value)}
+                  placeholder="amazon.com"
+                  className="h-11 rounded-xl text-sm"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label htmlFor="capture_variant" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Variant Text</label>
+                <Input
+                  id="capture_variant"
+                  value={captureVariantText}
+                  onChange={(e) => setCaptureVariantText(e.target.value)}
+                  placeholder="Color/size/finish"
+                  className="h-11 rounded-xl text-sm"
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label htmlFor="capture_dimensions" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dimensions Text</label>
+                <Textarea
+                  id="capture_dimensions"
+                  value={captureDimensionsText}
+                  onChange={(e) => setCaptureDimensionsText(e.target.value)}
+                  placeholder="Dimensions from specs"
+                  className="min-h-[64px] resize-none rounded-xl text-sm"
+                />
+              </div>
+            </div>
+          </details>
+
+          <div className="rounded-xl border border-border bg-background/60 p-3 text-xs text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-foreground">Review:</span>
+              {captureWeakFields.length ? (
+                captureWeakFields.map((f) => (
+                  <span key={f} className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800">
+                    weak {f}
+                  </span>
+                ))
+              ) : (
+                <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-800">strong capture</span>
+              )}
+              {hasExtracted ? (
+                <span className="rounded-full border border-border px-2 py-0.5">method: {captureMethod}</span>
+              ) : (
+                <span className="rounded-full border border-border px-2 py-0.5">manual</span>
+              )}
+            </div>
+          </div>
+
+          {recentRooms.length ? (
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent rooms</label>
+              <div className="flex flex-wrap gap-2">
+                {recentRooms.slice(0, 6).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => {
+                      setCaptureRoom(r as RoomId);
+                      setQuickRoom(r as RoomId);
+                    }}
+                    className="rounded-full border border-border bg-background px-3 py-2 text-sm transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-95"
+                  >
+                    {roomNameById.get(r as RoomId) || r}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <Button className="h-12 rounded-xl text-base shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98]" onClick={() => void onAddCaptured(false)}>
+              Add Item
+            </Button>
+            <Button variant="secondary" className="h-12 rounded-xl text-base transition-all duration-150 active:scale-[0.98]" onClick={() => void onAddCaptured(true)}>
+              Add & Edit
+            </Button>
+          </div>
         </div>
       </Card>
 

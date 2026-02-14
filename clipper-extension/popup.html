@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Furniture Tracker Clipper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <h1>Furniture Tracker Clipper</h1>
+      <p id="modeHint" class="modeHint">Detecting tab context...</p>
+
+      <section id="manualUrlSection" class="manualUrl hidden">
+        <label>
+          <span>Product URL</span>
+          <input id="manualUrl" type="text" placeholder="https://www.amazon.com/..." />
+        </label>
+      </section>
+
+      <div class="row">
+        <button id="captureBtn" class="primary">Capture Current Tab</button>
+        <button id="saveBtn">Save Settings</button>
+      </div>
+
+      <section class="settings">
+        <label>
+          <span>Clipper Token</span>
+          <input id="token" type="password" placeholder="CLIPPER_TOKEN" />
+        </label>
+
+        <details class="advanced">
+          <summary>Advanced endpoint settings (optional override)</summary>
+          <p class="muted">Leave blank to auto-detect from your open app tab.</p>
+          <label>
+            <span>Base API URL</span>
+            <input id="baseApiUrl" type="password" placeholder="https://app-furniture-tracker.vercel.app" />
+          </label>
+          <label>
+            <span>Base Web URL</span>
+            <input id="baseWebUrl" type="password" placeholder="https://app-furniture-tracker.vercel.app" />
+          </label>
+        </details>
+
+        <div id="resolvedTargets" class="resolvedTargets"></div>
+
+        <label class="checkbox">
+          <input id="autoCaptureOnPopupOpen" type="checkbox" />
+          <span>Auto-capture on popup open</span>
+        </label>
+        <label class="checkbox">
+          <input id="openEditTab" type="checkbox" />
+          <span>Open item edit tab after capture</span>
+        </label>
+      </section>
+
+      <section class="status">
+        <h2>Last Status</h2>
+        <div id="statusText" class="statusText idle">Waiting...</div>
+        <pre id="statusDetails" class="details"></pre>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -111,6 +111,14 @@ export default async function handler(req: any, res: any) {
         const dims = meta?.dimensions || parseDims(f["Dimensions"]) || null;
         const localIdRaw = typeof meta?.localId === "string" ? meta.localId.trim() : "";
         const localId = localIdRaw && !localIdRaw.startsWith("rec") ? localIdRaw : "";
+        const captureMethodRaw =
+          typeof meta?.specs?.captureMethod === "string"
+            ? meta.specs.captureMethod
+            : typeof meta?.clipper?.captureMethod === "string"
+              ? meta.clipper.captureMethod
+              : "";
+        const captureMethod = captureMethodRaw.trim().toLowerCase();
+        const needsReviewFromFallback = captureMethod === "fallback_scraper";
         if (localId) {
           itemLocalToRemote.set(localId, rec.id);
           itemRemoteToLocal.set(rec.id, localId);
@@ -142,6 +150,13 @@ export default async function handler(req: any, res: any) {
           priority: toNumber(f["Priority"] ?? f["Prioirity"]),
           dimensions: dims || undefined,
           specs: meta?.specs && typeof meta.specs === "object" ? meta.specs : null,
+          provenance: needsReviewFromFallback
+            ? {
+                dataSource: "estimated",
+                reviewStatus: "needs_review",
+                sourceRef: typeof f["Link"] === "string" ? f["Link"] : null,
+              }
+            : null,
           attachments: Array.isArray(meta?.attachments) ? meta.attachments : [],
           createdAt: toNumber(meta?.createdAt) || Date.now(),
           updatedAt: toNumber(meta?.updatedAt) || Date.now(),

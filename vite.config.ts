@@ -8,6 +8,7 @@ import s3JsonHandler from "./api/s3/json";
 import pullHandler from "./api/sync/pull";
 import pushHandler from "./api/sync/push";
 import scrapeProductHandler from "./api/scrape/product";
+import clipHandler from "./api/clip";
 
 function localApiPlugin(): Plugin {
   // Dev-only convenience: serve the Vercel-style `/api/*` routes during `vite` dev.
@@ -62,6 +63,14 @@ function localApiPlugin(): Plugin {
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ ok: false, message: err?.message || "Product scrape failed" }));
+          });
+          return;
+        }
+        if (url.startsWith("/clip")) {
+          void Promise.resolve(clipHandler(req, res)).catch((err: any) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, message: err?.message || "Clip failed" }));
           });
           return;
         }
