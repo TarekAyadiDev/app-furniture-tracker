@@ -24,7 +24,7 @@ export function BottomNav() {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/30 glass safe-bottom">
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto w-full flex justify-center">
         <div className="overflow-x-auto overflow-y-hidden px-1 py-2 [-webkit-overflow-scrolling:touch] [touch-action:pan-x]">
           <div className="flex min-w-full items-center gap-1">
             {NAV.map((n) => {

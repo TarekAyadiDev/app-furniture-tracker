@@ -725,47 +725,61 @@ export default function Items() {
                                   onClick={(e) => {
                                     const target = e.target as HTMLElement | null;
                                     if (target?.closest("a,button")) return;
+
+                                    // If placeholder, toggle open/close
+                                    if (isPlaceholder) {
+                                      setOpenItemOptions((cur) => ({ ...cur, [it.id]: !openOptions }));
+                                      return;
+                                    }
+
                                     nav(`/items/${it.id}`);
                                   }}
                                   onKeyDown={(e) => {
                                     if (e.key === "Enter" || e.key === " ") {
                                       e.preventDefault();
-                                      nav(`/items/${it.id}`);
+                                      if (isPlaceholder) {
+                                        setOpenItemOptions((cur) => ({ ...cur, [it.id]: !openOptions }));
+                                      } else {
+                                        nav(`/items/${it.id}`);
+                                      }
                                     }
                                   }}
                                 >
-                                  <div className="flex flex-wrap items-start justify-between gap-2">
-                                    <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
-                                      <div className="min-w-0 flex-[1_1_180px] truncate text-base font-semibold">
+                                  <div className="flex flex-col gap-1.5">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="min-w-0 flex-1 font-semibold leading-tight text-base">
                                         {it.name}
                                         {selectionLabel ? (
-                                          <span className="text-sm font-normal text-muted-foreground"> · {selectionLabel}</span>
+                                          <span className="font-normal text-muted-foreground"> · {selectionLabel}</span>
                                         ) : null}
                                       </div>
+                                      <StatusBadge status={it.status} size="sm" className="shrink-0" />
+                                    </div>
+
+                                    <div className="flex flex-wrap items-center gap-2">
                                       <Badge
                                         variant="outline"
                                         className={
                                           isPlaceholder
-                                            ? "border border-emerald-300 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-emerald-900 shadow-sm hover:bg-emerald-100"
-                                            : "border border-slate-300/90 bg-gradient-to-r from-slate-100 to-zinc-100 px-2.5 py-0.5 text-[11px] font-semibold tracking-[0.01em] text-slate-700 shadow-sm hover:from-slate-100 hover:to-zinc-100"
+                                            ? "border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-emerald-900 shadow-sm hover:bg-emerald-100"
+                                            : "border border-slate-300/90 bg-gradient-to-r from-slate-100 to-zinc-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-slate-700 shadow-sm hover:from-slate-100 hover:to-zinc-100"
                                         }
                                       >
                                         {isPlaceholder ? "Placeholder" : "Item"}
                                       </Badge>
+
+                                      <ReviewStatusBadge status={it.provenance?.reviewStatus} />
+                                      <DataSourceBadge dataSource={it.provenance?.dataSource} />
+
+                                      {modifiedFields.length ? (
+                                        <span className="text-[10px] text-muted-foreground">
+                                          Mod: {modifiedFields.slice(0, 2).join(", ")}
+                                          {modifiedFields.length > 2 ? ` +${modifiedFields.length - 2}` : ""}
+                                        </span>
+                                      ) : null}
                                     </div>
-                                    <StatusBadge status={it.status} className="shrink-0" />
                                   </div>
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    <ReviewStatusBadge status={it.provenance?.reviewStatus} />
-                                    <DataSourceBadge dataSource={it.provenance?.dataSource} />
-                                    {modifiedFields.length ? (
-                                      <span className="text-xs text-muted-foreground">
-                                        Changed: {modifiedFields.slice(0, 4).join(", ")}
-                                        {modifiedFields.length > 4 ? ` +${modifiedFields.length - 4}` : ""}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                     <span className="truncate">{it.category || "Other"}</span>
                                     {displayStore ? <span className="truncate">{displayStore}</span> : null}
                                     {displayPrice !== null ? <span>{formatMoneyUSD(displayPrice)}</span> : <span className="italic">no price</span>}
@@ -800,17 +814,19 @@ export default function Items() {
                                   </div>
                                 </div>
                                 {itemOpts.length ? (
-                                  <button
+                                  <Button
                                     type="button"
-                                    className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                                    variant="secondary"
+                                    size="sm"
+                                    className="mt-3 h-8 w-full justify-between px-3 text-xs font-medium text-foreground hover:bg-secondary/80 sm:w-auto sm:justify-center"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setOpenItemOptions((cur) => ({ ...cur, [it.id]: !openOptions }));
                                     }}
                                   >
+                                    <span>{openOptions ? "Hide variations" : `Show variations (${itemOpts.length})`}</span>
                                     <ChevronDown className={["h-4 w-4 transition-transform", openOptions ? "rotate-180" : ""].join(" ")} />
-                                    {openOptions ? "Hide variations" : `Show variations (${itemOpts.length})`}
-                                  </button>
+                                  </Button>
                                 ) : null}
                                 {canDragToPlaceholder ? (
                                   <button
@@ -1173,7 +1189,7 @@ function ItemPhotoStrip({ itemId, fallbackOptionId }: { itemId: string; fallback
   const displayUrls = usingFallback ? fallbackUrls : urls;
 
   return (
-    <div className="w-[120px] shrink-0 space-y-2">
+    <div className="w-[80px] shrink-0 space-y-2 sm:w-[120px]">
       {displayAttachments.length ? (
         <div className="flex flex-col gap-2">
           {/* Main large image */}

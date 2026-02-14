@@ -7,6 +7,7 @@ import s3SignHandler from "./api/s3/sign";
 import s3JsonHandler from "./api/s3/json";
 import pullHandler from "./api/sync/pull";
 import pushHandler from "./api/sync/push";
+import scrapeProductHandler from "./api/scrape/product";
 
 function localApiPlugin(): Plugin {
   // Dev-only convenience: serve the Vercel-style `/api/*` routes during `vite` dev.
@@ -53,6 +54,14 @@ function localApiPlugin(): Plugin {
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ ok: false, message: err?.message || "Sync push failed" }));
+          });
+          return;
+        }
+        if (url.startsWith("/scrape/product")) {
+          void Promise.resolve(scrapeProductHandler(req, res)).catch((err: any) => {
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: false, message: err?.message || "Product scrape failed" }));
           });
           return;
         }
