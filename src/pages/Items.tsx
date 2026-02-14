@@ -27,10 +27,29 @@ type RoomFilter = RoomId | "All";
 type StatusFilter = ItemStatus | "All";
 const NO_STORE_FILTER = "__none__";
 const ITEMS_UI_KEY = "ft_items_ui_state_v1";
+const ITEMS_FILTERS_KEY = "ft_items_filters_state_v1";
 
 type ItemsUiState = {
   openRooms: string[];
   openItemOptions: Record<string, boolean>;
+};
+
+type ItemsFiltersState = {
+  q: string;
+  roomFilter: RoomFilter;
+  statusFilter: StatusFilter;
+  storeFilter: string;
+  minPrice: string;
+  maxPrice: string;
+};
+
+const DEFAULT_ITEMS_FILTERS: ItemsFiltersState = {
+  q: "",
+  roomFilter: "All",
+  statusFilter: "All",
+  storeFilter: "",
+  minPrice: "",
+  maxPrice: "",
 };
 
 function loadItemsUiState(): ItemsUiState {
@@ -45,6 +64,40 @@ function loadItemsUiState(): ItemsUiState {
     };
   } catch {
     return { openRooms: [], openItemOptions: {} };
+  }
+}
+
+function loadItemsFiltersState(): ItemsFiltersState {
+  try {
+    if (typeof window === "undefined") return { ...DEFAULT_ITEMS_FILTERS };
+    const raw = localStorage.getItem(ITEMS_FILTERS_KEY);
+    if (!raw) return { ...DEFAULT_ITEMS_FILTERS };
+    const parsed = JSON.parse(raw);
+    const roomFilter =
+      typeof parsed?.roomFilter === "string" && parsed.roomFilter.trim() ? (parsed.roomFilter as RoomFilter) : "All";
+    const statusFilter =
+      typeof parsed?.statusFilter === "string" && (ITEM_STATUSES as readonly string[]).includes(parsed.statusFilter)
+        ? (parsed.statusFilter as StatusFilter)
+        : "All";
+    return {
+      q: typeof parsed?.q === "string" ? parsed.q : "",
+      roomFilter,
+      statusFilter,
+      storeFilter: typeof parsed?.storeFilter === "string" ? parsed.storeFilter : "",
+      minPrice: typeof parsed?.minPrice === "string" ? parsed.minPrice : "",
+      maxPrice: typeof parsed?.maxPrice === "string" ? parsed.maxPrice : "",
+    };
+  } catch {
+    return { ...DEFAULT_ITEMS_FILTERS };
+  }
+}
+
+function saveItemsFiltersState(state: ItemsFiltersState) {
+  try {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(ITEMS_FILTERS_KEY, JSON.stringify(state));
+  } catch {
+    // ignore storage failures
   }
 }
 
@@ -116,12 +169,13 @@ export default function Items() {
 
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const [roomFilter, setRoomFilter] = useState<RoomFilter>("All");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
-  const [storeFilter, setStoreFilter] = useState("");
-  const [minPrice, setMinPrice] = useState("");
-  const [maxPrice, setMaxPrice] = useState("");
+  const initialFilters = useMemo(() => loadItemsFiltersState(), []);
+  const [q, setQ] = useState(initialFilters.q);
+  const [roomFilter, setRoomFilter] = useState<RoomFilter>(initialFilters.roomFilter);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialFilters.statusFilter);
+  const [storeFilter, setStoreFilter] = useState(initialFilters.storeFilter);
+  const [minPrice, setMinPrice] = useState(initialFilters.minPrice);
+  const [maxPrice, setMaxPrice] = useState(initialFilters.maxPrice);
 
   const [reorderRoomsMode, setReorderRoomsMode] = useState(false);
   const [reorderRoomId, setReorderRoomId] = useState<RoomId | null>(null);
@@ -138,6 +192,23 @@ export default function Items() {
   const storeByName = useMemo(() => buildStoreIndex(orderedStores), [orderedStores]);
   const itemById = useMemo(() => new Map(items.filter((i) => i.syncState !== "deleted").map((i) => [i.id, i])), [items]);
   const itemNameById = useMemo(() => new Map(items.filter((i) => i.syncState !== "deleted").map((i) => [i.id, i.name])), [items]);
+
+  useEffect(() => {
+    if (roomFilter !== "All" && !orderedRoomIds.includes(roomFilter)) {
+      setRoomFilter("All");
+    }
+  }, [orderedRoomIds, roomFilter]);
+
+  useEffect(() => {
+    saveItemsFiltersState({
+      q,
+      roomFilter,
+      statusFilter,
+      storeFilter,
+      minPrice,
+      maxPrice,
+    });
+  }, [q, roomFilter, statusFilter, storeFilter, minPrice, maxPrice]);
 
   function buildCopyName(base: string) {
     const name = base.trim() || "New item";
@@ -562,6 +633,15 @@ export default function Items() {
     return n;
   }, [roomFilter, statusFilter, storeFilter, minPrice, maxPrice]);
 
+  function resetFilters() {
+    setQ("");
+    setRoomFilter("All");
+    setStatusFilter("All");
+    setStoreFilter("");
+    setMinPrice("");
+    setMaxPrice("");
+  }
+
   return (
     <div className="space-y-5">
       <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
@@ -582,6 +662,14 @@ export default function Items() {
             onClick={() => setFiltersOpen((v) => !v)}
           >
             Filter{activeFilterCount ? ` (${activeFilterCount})` : ""}
+          </Button>
+          <Button
+            variant="ghost"
+            className="h-12 rounded-xl px-4"
+            onClick={resetFilters}
+            disabled={!q.trim() && activeFilterCount === 0}
+          >
+            Reset filters
           </Button>
         </div>
 
