@@ -292,6 +292,27 @@ export default function Items() {
           addAttachmentFromBlob("option", newOptId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
         ),
       );
+      const optionSubItems = subItemsByOption.get(option.id) || [];
+      for (const sub of optionSubItems) {
+        const newSubId = await createSubItem({
+          optionId: newOptId,
+          title: sub.title,
+          qty: subItemQty(sub),
+          price: sub.price ?? null,
+          taxEstimate: sub.taxEstimate ?? null,
+          discountType: sub.discountType ?? null,
+          discountValue: sub.discountValue ?? null,
+          extraWarrantyCost: sub.extraWarrantyCost ?? null,
+          notes: sub.notes ?? null,
+          provenance: sub.provenance,
+        });
+        const subAtts = await listAttachments("subItem", sub.id);
+        await Promise.all(
+          subAtts.slice(0, maxAttachments).map((att) =>
+            addAttachmentFromBlob("subItem", newSubId, att.blob, { name: att.name ?? null, sourceUrl: att.sourceUrl ?? null }),
+          ),
+        );
+      }
       toast({ title: "Option duplicated", description: titleCopy });
     } catch (err: any) {
       toast({ title: "Duplicate failed", description: err?.message || "Could not duplicate option." });
@@ -713,9 +734,9 @@ export default function Items() {
                                     }
                                   }}
                                 >
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="min-w-0 flex items-center gap-2">
-                                      <div className="truncate text-base font-semibold">
+                                  <div className="flex flex-wrap items-start justify-between gap-2">
+                                    <div className="min-w-0 flex flex-1 flex-wrap items-center gap-2">
+                                      <div className="min-w-0 flex-[1_1_180px] truncate text-base font-semibold">
                                         {it.name}
                                         {selectionLabel ? (
                                           <span className="text-sm font-normal text-muted-foreground"> · {selectionLabel}</span>
@@ -732,7 +753,7 @@ export default function Items() {
                                         {isPlaceholder ? "Placeholder" : "Item"}
                                       </Badge>
                                     </div>
-                                    <StatusBadge status={it.status} />
+                                    <StatusBadge status={it.status} className="shrink-0" />
                                   </div>
                                   <div className="mt-2 flex flex-wrap gap-2">
                                     <ReviewStatusBadge status={it.provenance?.reviewStatus} />
