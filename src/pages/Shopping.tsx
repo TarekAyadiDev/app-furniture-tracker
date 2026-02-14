@@ -88,12 +88,11 @@ function sourceDomainFromUrl(value: string): string {
 export default function Shopping() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, createItem } = useData();
+  const { orderedRooms, roomNameById, items, createItem, reorderItems } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
   const validRoomIds = useMemo(() => new Set(orderedRoomIds), [orderedRoomIds]);
 
-  const captureNameRef = useRef<HTMLInputElement | null>(null);
   const quickNameRef = useRef<HTMLInputElement | null>(null);
 
   const [productUrl, setProductUrl] = useState("");
@@ -113,7 +112,6 @@ export default function Shopping() {
   const [captureSourceDomain, setCaptureSourceDomain] = useState("");
   const [captureSpecs, setCaptureSpecs] = useState<CaptureSpec[]>([]);
   const [captureMethod, setCaptureMethod] = useState<"fallback_scraper" | "browser" | "manual">("manual");
-  const [hasExtracted, setHasExtracted] = useState(false);
 
   const [quickName, setQuickName] = useState("");
   const [quickRoom, setQuickRoom] = useState<RoomId>(() => loadRecents(RECENT_ROOMS_KEY)[0] || "Living");
@@ -134,15 +132,6 @@ export default function Shopping() {
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 8);
   }, [items]);
-
-  const captureWeakFields = useMemo(() => {
-    const weak: string[] = [];
-    if (!parseNumberOrNull(capturePrice)) weak.push("price");
-    if (!normalizeText(captureImageUrl)) weak.push("image");
-    if (!normalizeText(captureBrand)) weak.push("brand");
-    if (!normalizeText(captureDescription)) weak.push("description");
-    return weak;
-  }, [capturePrice, captureImageUrl, captureBrand, captureDescription]);
 
   function rememberRoom(room: RoomId) {
     pushRecent(RECENT_ROOMS_KEY, room);
@@ -234,17 +223,15 @@ export default function Shopping() {
       setCaptureSourceDomain(normalizeText(json.data.sourceDomain) || sourceDomainFromUrl(extractedUrl));
       setCaptureSpecs(Array.isArray(json.data.specs) ? json.data.specs.filter((s) => normalizeText(s?.key) && normalizeText(s?.value)) : []);
       setCaptureMethod(json.data.captureMethod === "browser" ? "browser" : "fallback_scraper");
-      setHasExtracted(true);
       setProductUrl(extractedUrl || target);
 
       toast({
         title: "Product extracted",
-        description: "Review highlighted weak fields, adjust if needed, then add.",
+        description: "Extraction complete. Select room and add item.",
       });
     } catch (err: any) {
       if (!captureName.trim()) setCaptureName("New Item");
       setProductUrl(target);
-      setHasExtracted(false);
       toast({
         variant: "destructive",
         title: "Extraction failed",
@@ -256,11 +243,7 @@ export default function Shopping() {
   }
 
   async function onAddCaptured(openAfter = false) {
-    const trimmedName = captureName.trim();
-    if (!trimmedName) {
-      captureNameRef.current?.focus();
-      return;
-    }
+    const trimmedName = captureName.trim() || "New Item";
 
     const trimmedUrl = productUrl.trim() || null;
     const sourceDomain = normalizeText(captureSourceDomain) || sourceDomainFromUrl(trimmedUrl || "");
@@ -283,6 +266,12 @@ export default function Shopping() {
       captureMethod: captureMethod,
     });
 
+    // Keep URL captures at the top of the room list for quick drag/reorder to placeholders.
+    const roomItemIds = items
+      .filter((it) => it.syncState !== "deleted" && it.room === captureRoom)
+      .map((it) => it.id);
+    await reorderItems(captureRoom, [id, ...roomItemIds]);
+
     rememberRoom(captureRoom);
 
     setProductUrl("");
@@ -299,9 +288,6 @@ export default function Shopping() {
     setCaptureSourceDomain("");
     setCaptureSpecs([]);
     setCaptureMethod("manual");
-    setHasExtracted(false);
-    captureNameRef.current?.focus();
-
     toast({
       title: "Item added",
       description: `${trimmedName} · ${roomNameById.get(captureRoom) || captureRoom}`,
@@ -347,8 +333,8 @@ export default function Shopping() {
   }
 
   return (
-    <div className="space-y-5">
-      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+    <div className="flex flex-col gap-5">
+      <Card className="order-2 glass rounded-2xl border border-border/50 p-5 shadow-elegant">
         <div className="space-y-4">
           <div>
             <h2 className="font-heading text-lg font-semibold text-foreground">Quick Add</h2>
@@ -405,11 +391,11 @@ export default function Shopping() {
         </div>
       </Card>
 
-      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+      <Card className="order-1 glass rounded-2xl border border-border/50 p-5 shadow-elegant">
         <div className="space-y-4">
           <div>
             <h2 className="font-heading text-lg font-semibold text-foreground">Capture From URL</h2>
-            <p className="text-xs text-muted-foreground">Extract, review weak fields, then add.</p>
+            <p className="text-xs text-muted-foreground">Paste URL, choose room, then add.</p>
           </div>
 
           <div className="space-y-2">
@@ -437,210 +423,31 @@ export default function Shopping() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <label htmlFor="capture_name" className="text-xs font-semibold uppercase tracking-widest text-primary">
-              Title
-            </label>
-            <Input
-              id="capture_name"
-              ref={captureNameRef}
-              value={captureName}
-              onChange={(e) => setCaptureName(e.target.value)}
-              placeholder="e.g. Queen mattress protector"
-              className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label htmlFor="capture_room" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
-              <select
-                id="capture_room"
-                value={captureRoom}
-                onChange={(e) => setCaptureRoom(e.target.value as RoomId)}
-                className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                {orderedRoomIds.map((r) => (
-                  <option key={r} value={r}>
-                    {roomNameById.get(r) || r}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="capture_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Price</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <Input
-                  id="capture_price"
-                  inputMode="decimal"
-                  value={capturePrice}
-                  onChange={(e) => setCapturePrice(e.target.value)}
-                  placeholder="0"
-                  className="h-12 rounded-xl pl-7 text-base focus:ring-2 focus:ring-ring"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <label htmlFor="capture_brand" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Brand</label>
-              <Input
-                id="capture_brand"
-                value={captureBrand}
-                onChange={(e) => setCaptureBrand(e.target.value)}
-                placeholder="e.g. Sealy"
-                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="capture_image_url" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Image URL</label>
-              <Input
-                id="capture_image_url"
-                value={captureImageUrl}
-                onChange={(e) => setCaptureImageUrl(e.target.value)}
-                placeholder="https://..."
-                className="h-12 rounded-xl text-base focus:ring-2 focus:ring-ring"
-                autoComplete="off"
-              />
-            </div>
-          </div>
-
           <div className="space-y-1.5">
-            <label htmlFor="capture_description" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description</label>
-            <Textarea
-              id="capture_description"
-              value={captureDescription}
-              onChange={(e) => setCaptureDescription(e.target.value)}
-              placeholder="Material, size, color, delivery notes..."
-              className="min-h-[88px] resize-none rounded-xl text-base focus:ring-2 focus:ring-ring"
-            />
+            <label htmlFor="capture_room" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
+            <select
+              id="capture_room"
+              value={captureRoom}
+              onChange={(e) => setCaptureRoom(e.target.value as RoomId)}
+              className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              {orderedRoomIds.map((r) => (
+                <option key={r} value={r}>
+                  {roomNameById.get(r) || r}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <details className="rounded-xl border border-border bg-background/60 p-3">
-            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Capture Fields</summary>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <label htmlFor="capture_currency" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Currency</label>
-                <Input
-                  id="capture_currency"
-                  value={captureCurrency}
-                  onChange={(e) => setCaptureCurrency(e.target.value)}
-                  placeholder="USD"
-                  className="h-11 rounded-xl text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="capture_original_price" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Original Price</label>
-                <Input
-                  id="capture_original_price"
-                  value={captureOriginalPrice}
-                  onChange={(e) => setCaptureOriginalPrice(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="0"
-                  className="h-11 rounded-xl text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="capture_discount_percent" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Discount %</label>
-                <Input
-                  id="capture_discount_percent"
-                  value={captureDiscountPercent}
-                  onChange={(e) => setCaptureDiscountPercent(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="0"
-                  className="h-11 rounded-xl text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="capture_source_domain" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Source Domain</label>
-                <Input
-                  id="capture_source_domain"
-                  value={captureSourceDomain}
-                  onChange={(e) => setCaptureSourceDomain(e.target.value)}
-                  placeholder="amazon.com"
-                  className="h-11 rounded-xl text-sm"
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <label htmlFor="capture_variant" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Variant Text</label>
-                <Input
-                  id="capture_variant"
-                  value={captureVariantText}
-                  onChange={(e) => setCaptureVariantText(e.target.value)}
-                  placeholder="Color/size/finish"
-                  className="h-11 rounded-xl text-sm"
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <label htmlFor="capture_dimensions" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dimensions Text</label>
-                <Textarea
-                  id="capture_dimensions"
-                  value={captureDimensionsText}
-                  onChange={(e) => setCaptureDimensionsText(e.target.value)}
-                  placeholder="Dimensions from specs"
-                  className="min-h-[64px] resize-none rounded-xl text-sm"
-                />
-              </div>
-            </div>
-          </details>
-
-          <div className="rounded-xl border border-border bg-background/60 p-3 text-xs text-muted-foreground">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold text-foreground">Review:</span>
-              {captureWeakFields.length ? (
-                captureWeakFields.map((f) => (
-                  <span key={f} className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800">
-                    weak {f}
-                  </span>
-                ))
-              ) : (
-                <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-emerald-800">strong capture</span>
-              )}
-              {hasExtracted ? (
-                <span className="rounded-full border border-border px-2 py-0.5">method: {captureMethod}</span>
-              ) : (
-                <span className="rounded-full border border-border px-2 py-0.5">manual</span>
-              )}
-            </div>
-          </div>
-
-          {recentRooms.length ? (
-            <div className="space-y-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent rooms</label>
-              <div className="flex flex-wrap gap-2">
-                {recentRooms.slice(0, 6).map((r) => (
-                  <button
-                    key={r}
-                    type="button"
-                    onClick={() => {
-                      setCaptureRoom(r as RoomId);
-                      setQuickRoom(r as RoomId);
-                    }}
-                    className="rounded-full border border-border bg-background px-3 py-2 text-sm transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-95"
-                  >
-                    {roomNameById.get(r as RoomId) || r}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <Button className="h-12 rounded-xl text-base shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98]" onClick={() => void onAddCaptured(false)}>
+          <div className="pt-2">
+            <Button className="h-12 w-full rounded-xl text-base shadow-sm transition-all duration-150 hover:opacity-90 active:scale-[0.98]" onClick={() => void onAddCaptured(false)}>
               Add Item
-            </Button>
-            <Button variant="secondary" className="h-12 rounded-xl text-base transition-all duration-150 active:scale-[0.98]" onClick={() => void onAddCaptured(true)}>
-              Add & Edit
             </Button>
           </div>
         </div>
       </Card>
 
-      <Card className="glass rounded-2xl border border-border/50 p-5 shadow-elegant">
+      <Card className="order-3 glass rounded-2xl border border-border/50 p-5 shadow-elegant">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-heading text-lg font-semibold text-foreground">Recently Added</h2>
