@@ -332,6 +332,10 @@ export default function ItemDetail() {
   const [importQuery, setImportQuery] = useState("");
   const [importSelectedId, setImportSelectedId] = useState<string | null>(null);
   const [importBusy, setImportBusy] = useState(false);
+  const [assignOpen, setAssignOpen] = useState(false);
+  const [assignQuery, setAssignQuery] = useState("");
+  const [assignSelectedId, setAssignSelectedId] = useState<string | null>(null);
+  const [assignBusy, setAssignBusy] = useState(false);
   const [optionSpecDrafts, setOptionSpecDrafts] = useState<Record<string, { key: string; value: string }>>({});
 
   const filteredOptions = useMemo(() => {
@@ -489,6 +493,29 @@ export default function ItemDetail() {
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [existingParentLinks, importQuery, importedSourceItemIds, item, items, options]);
+
+  const assignPlaceholderCandidates = useMemo(() => {
+    if (!item || optionOnly) return [];
+    const needle = assignQuery.trim().toLowerCase();
+    return items
+      .filter((i) => i.syncState !== "deleted")
+      .filter((i) => i.id !== item.id)
+      .filter((i) => {
+        const candidateHasOptions = options.some((o) => o.syncState !== "deleted" && o.itemId === i.id);
+        return inferItemKind(i, candidateHasOptions) === "placeholder";
+      })
+      .filter((i) => {
+        if (!needle) return true;
+        const blob = `${i.name} ${roomNameById.get(i.room) || i.room}`;
+        return includesText(blob, needle);
+      })
+      .sort((a, b) => {
+        const ra = roomNameById.get(a.room) || a.room;
+        const rb = roomNameById.get(b.room) || b.room;
+        if (ra !== rb) return ra.localeCompare(rb);
+        return a.name.localeCompare(b.name);
+      });
+  }, [assignQuery, item, items, optionOnly, options, roomNameById]);
 
   const roomMeasurements = useMemo(() => {
     return measurements.filter((m) => m.syncState !== "deleted" && m.room === item?.room);
@@ -962,6 +989,27 @@ export default function ItemDetail() {
       toast({ title: "Import failed", description: err?.message || "Could not import item." });
     } finally {
       setImportBusy(false);
+    }
+  }
+
+  async function onAssignToPlaceholder() {
+    if (!item || itemIsPlaceholder || !assignSelectedId || assignBusy) return;
+    setAssignBusy(true);
+    try {
+      await convertItemToOption(assignSelectedId, item.id);
+      const parent = items.find((it) => it.id === assignSelectedId);
+      toast({
+        title: "Assigned to placeholder",
+        description: parent ? `${item.name} moved under ${parent.name}.` : "Item moved as placeholder variation.",
+      });
+      setAssignOpen(false);
+      setAssignSelectedId(null);
+      setAssignQuery("");
+      nav(`/items/${assignSelectedId}`);
+    } catch (err: any) {
+      toast({ title: "Assign failed", description: err?.message || "Could not assign this item to a placeholder." });
+    } finally {
+      setAssignBusy(false);
     }
   }
 
@@ -2670,6 +2718,21 @@ export default function ItemDetail() {
           </div>
           <div>Child options: {childOptionsLabel}</div>
         </div>
+        {!itemIsPlaceholder && !optionOnly ? (
+          <div className="mt-3">
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                setAssignOpen(true);
+                setAssignSelectedId(null);
+                setAssignQuery("");
+              }}
+            >
+              Assign to Placeholder
+            </Button>
+          </div>
+        ) : null}
       </Card>
 
       <Dialog
@@ -2733,6 +2796,63 @@ export default function ItemDetail() {
             </Button>
             <Button onClick={() => void onImportExistingItem()} disabled={!importSelectedId || importBusy}>
               {importBusy ? "Importing..." : "Import as option"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={assignOpen}
+        onOpenChange={(open) => {
+          setAssignOpen(open);
+          if (!open) {
+            setAssignSelectedId(null);
+            setAssignQuery("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Assign to placeholder</DialogTitle>
+            <DialogDescription>Move this standalone item under a placeholder as a variation.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              value={assignQuery}
+              onChange={(e) => setAssignQuery(e.target.value)}
+              placeholder="Search placeholders by title or room..."
+              className="h-11 text-base"
+            />
+            <div className="max-h-[360px] overflow-y-auto space-y-2 pr-1">
+              {assignPlaceholderCandidates.length ? (
+                assignPlaceholderCandidates.map((candidate) => {
+                  const isSelected = assignSelectedId === candidate.id;
+                  return (
+                    <button
+                      key={candidate.id}
+                      type="button"
+                      onClick={() => setAssignSelectedId(candidate.id)}
+                      className={[
+                        "w-full rounded-md border px-3 py-2 text-left transition",
+                        isSelected ? "border-foreground bg-secondary/60" : "hover:border-foreground/60",
+                      ].join(" ")}
+                    >
+                      <div className="font-medium">{candidate.name}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{roomNameById.get(candidate.room) || candidate.room}</div>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="text-sm text-muted-foreground">No placeholder items available.</div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setAssignOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void onAssignToPlaceholder()} disabled={!assignSelectedId || assignBusy}>
+              {assignBusy ? "Assigning..." : "Assign"}
             </Button>
           </DialogFooter>
         </DialogContent>

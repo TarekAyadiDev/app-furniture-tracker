@@ -51,6 +51,30 @@ function fileExt(name: string | null | undefined): string {
   return value.slice(idx + 1);
 }
 
+function normalizeRemoteUrl(input: string): string | null {
+  const raw = String(input || "").trim();
+  if (!raw) return null;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function inferNameFromUrl(input: string): string | null {
+  try {
+    const parsed = new URL(input);
+    const segment = parsed.pathname.split("/").filter(Boolean).pop() || "";
+    if (!segment) return null;
+    const cleaned = decodeURIComponent(segment).trim();
+    return cleaned || null;
+  } catch {
+    return null;
+  }
+}
+
 function inferContentType(name: string | null | undefined): string | null {
   const ext = fileExt(name);
   if (!ext) return null;
@@ -172,6 +196,33 @@ export async function addAttachmentFromUrl(
   const blob = await res.blob();
   const name = url.split("/").pop() || "photo";
   return await addAttachmentFromBlob(parentType, parentId, blob, { name });
+}
+
+export async function addAttachmentLink(
+  parentType: AttachmentParentType,
+  parentId: string,
+  url: string,
+  opts?: { name?: string | null; mime?: string | null },
+): Promise<AttachmentRecord> {
+  const normalizedUrl = normalizeRemoteUrl(url);
+  if (!normalizedUrl) throw new Error("Invalid attachment URL.");
+  const ts = nowMs();
+  const record: AttachmentRecord = {
+    id: newId("att"),
+    parentType,
+    parentId,
+    parentKey: parentKey(parentType, parentId),
+    name: opts?.name ?? inferNameFromUrl(normalizedUrl),
+    sourceUrl: normalizedUrl,
+    mime: opts?.mime ?? null,
+    size: null,
+    blob: new Blob([], { type: opts?.mime || "" }),
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  await idbPut("attachments", record);
+  await touchParent(parentType, parentId);
+  return record;
 }
 
 export async function deleteAttachment(id: string): Promise<void> {

@@ -100,6 +100,21 @@ function normalizeUrl(input) {
   }
 }
 
+function normalizeUrlList(input, limit = 20) {
+  if (!Array.isArray(input)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const raw of input) {
+    const next = normalizeUrl(raw);
+    if (!next) continue;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    out.push(next);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 function normalizeDomain(input, fallbackUrl) {
   const value = cleanText(input).replace(/^www\./i, "");
   if (value) return value;
@@ -113,7 +128,7 @@ function normalizeDomain(input, fallbackUrl) {
 function shouldUseFallback(payload) {
   const hasName = Boolean(cleanText(payload?.name));
   const hasPrice = typeof payload?.price === "number" && Number.isFinite(payload.price);
-  const hasImage = Boolean(cleanText(payload?.imageUrl));
+  const hasImage = Boolean(cleanText(payload?.imageUrl)) || normalizeUrlList(payload?.imageUrls, 1).length > 0;
   if (!hasName) return true;
   return !hasPrice && !hasImage;
 }
@@ -283,6 +298,12 @@ async function callScraper(baseApiUrl, sourceUrl) {
 function mergePayload(basePayload, scraperData, sourceUrl, fallbackReason = "") {
   const base = basePayload && typeof basePayload === "object" ? basePayload : {};
   const scraper = scraperData && typeof scraperData === "object" ? scraperData : {};
+  const imageUrls = normalizeUrlList([
+    ...(Array.isArray(base.imageUrls) ? base.imageUrls : []),
+    base.imageUrl,
+    ...(Array.isArray(scraper.imageUrls) ? scraper.imageUrls : []),
+    scraper.imageUrl,
+  ]);
   return {
     sourceUrl: normalizeUrl(base.sourceUrl || scraper.sourceUrl || sourceUrl) || sourceUrl,
     sourceDomain: normalizeDomain(base.sourceDomain || scraper.sourceDomain, sourceUrl),
@@ -291,7 +312,8 @@ function mergePayload(basePayload, scraperData, sourceUrl, fallbackReason = "") 
     currency: cleanText(base.currency || scraper.currency) || null,
     originalPrice: normalizeNumber(base.originalPrice ?? scraper.originalPrice),
     discountPercent: normalizeNumber(base.discountPercent ?? scraper.discountPercent),
-    imageUrl: normalizeUrl(base.imageUrl || scraper.imageUrl),
+    imageUrl: imageUrls[0] || null,
+    imageUrls,
     brand: cleanText(base.brand || scraper.brand) || null,
     description: cleanText(base.description || scraper.description) || null,
     dimensionsText: cleanText(base.dimensionsText || scraper.dimensionsText) || null,
@@ -380,10 +402,44 @@ async function postClipWithRetry(baseApiUrls, token, payload) {
   throw error;
 }
 
-async function openOrFocusEditTab(baseWebUrl, itemId) {
+function toLocalClipPayload(payload) {
+  const imageUrls = normalizeUrlList([
+    payload?.imageUrl,
+    ...(Array.isArray(payload?.imageUrls) ? payload.imageUrls : []),
+  ]);
+  return {
+    sourceUrl: normalizeUrl(payload?.sourceUrl) || null,
+    sourceDomain: normalizeDomain(payload?.sourceDomain, payload?.sourceUrl || ""),
+    name: cleanText(payload?.name) || "New Item",
+    price: normalizeNumber(payload?.price),
+    currency: cleanText(payload?.currency) || null,
+    originalPrice: normalizeNumber(payload?.originalPrice),
+    discountPercent: normalizeNumber(payload?.discountPercent),
+    imageUrl: imageUrls[0] || null,
+    imageUrls,
+    brand: cleanText(payload?.brand) || null,
+    description: cleanText(payload?.description) || null,
+    dimensionsText: cleanText(payload?.dimensionsText) || null,
+    variantText: cleanText(payload?.variantText) || null,
+    specs: Array.isArray(payload?.specs) ? payload.specs : [],
+    captureMethod: cleanText(payload?.captureMethod) === "fallback_scraper" ? "fallback_scraper" : "browser",
+    room: cleanText(payload?.room) || null,
+  };
+}
+
+function encodePayloadForUrl(payload) {
+  const json = JSON.stringify(payload);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function openOrFocusEditTab(baseWebUrl, payload) {
   const base = normalizeBaseUrl(baseWebUrl);
   if (!base) throw new Error("Missing baseWebUrl.");
-  const editUrl = `${base}/clip/open/${encodeURIComponent(itemId)}?from=clipper`;
+  const encodedPayload = encodeURIComponent(encodePayloadForUrl(toLocalClipPayload(payload)));
+  const editUrl = `${base}/clip/open/new?from=clipper&payload=${encodedPayload}`;
   let origin = "";
   try {
     origin = new URL(base).origin;
@@ -392,7 +448,7 @@ async function openOrFocusEditTab(baseWebUrl, itemId) {
   }
 
   const candidates = await chrome.tabs.query({ url: [`${origin}/clip/open/*`, `${origin}/items/*`] });
-  const match = candidates.find((tab) => cleanText(tab.url).includes(`/clip/open/${itemId}`) || cleanText(tab.url).includes(`/items/${itemId}`));
+  const match = candidates.find((tab) => cleanText(tab.url).includes("/clip/open/") || cleanText(tab.url).includes("/items/"));
   if (match?.id) {
     await chrome.tabs.update(match.id, { active: true, url: editUrl });
     if (typeof match.windowId === "number") {
@@ -467,7 +523,6 @@ async function performCapture(options = {}) {
   const sourceUrlOverride = normalizeUrl(options.sourceUrlOverride);
 
   const settings = await getSettings();
-  if (!settings.token) throw new Error("Missing clipper token. Open popup settings and set token first.");
 
   const tab = await getActiveTab();
   const targets = await resolveTargets(settings, tab.url);
@@ -490,30 +545,27 @@ async function performCapture(options = {}) {
     fallbackWarning = extracted.fallbackWarning;
   }
 
-  const clipResponse = await postClipWithRetry(targets.candidateApiUrls, settings.token, payload);
-  const baseWebUrl = targets.usedConfiguredWeb ? targets.baseWebUrl : clipResponse.apiBaseUrl;
+  const baseWebUrl = targets.baseWebUrl;
 
   let opened = null;
   if (settings.openEditTab !== false) {
-    opened = await openOrFocusEditTab(baseWebUrl, clipResponse.itemId);
+    opened = await openOrFocusEditTab(baseWebUrl, payload);
   }
 
   const status = await setLastStatus({
     ok: true,
     trigger,
-    itemId: clipResponse.itemId,
+    itemId: null,
     usedFallback,
     message: usedFallback
-      ? "Captured with fallback scraper. Opened item editor."
-      : "Captured from browser page. Opened item editor.",
+      ? "Captured with fallback scraper. Opened local item editor."
+      : "Captured from browser page. Opened local item editor.",
     details: {
       sourceUrl: payload.sourceUrl || tab.url,
       sourceDomain: payload.sourceDomain || "",
       fallbackWarning: fallbackWarning || null,
       openedUrl: opened?.url || null,
-      clipApiBaseUrl: clipResponse.apiBaseUrl,
-      clipEndpoint: clipResponse.endpoint,
-      attempts: clipResponse.attempts || [],
+      captureTarget: "local_app_state",
     },
   });
 

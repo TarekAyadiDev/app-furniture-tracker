@@ -42,6 +42,32 @@
     return { amount, currency: currency ? String(currency).toUpperCase() : null };
   }
 
+  function normalizeUrl(input) {
+    const raw = cleanText(input);
+    if (!raw) return null;
+    try {
+      const parsed = new URL(raw, location.href);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+      return parsed.toString();
+    } catch {
+      return null;
+    }
+  }
+
+  function uniqueUrlList(values, limit = 12) {
+    const out = [];
+    const seen = new Set();
+    for (const entry of values || []) {
+      const next = normalizeUrl(entry);
+      if (!next) continue;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      out.push(next);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
   function firstTruthy(...values) {
     for (const value of values) {
       if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -117,7 +143,7 @@
 
   function extractImage(value) {
     if (!value) return null;
-    if (typeof value === "string") return cleanText(value) || null;
+    if (typeof value === "string") return normalizeUrl(value);
     if (Array.isArray(value)) {
       for (const entry of value) {
         const next = extractImage(entry);
@@ -126,9 +152,36 @@
       return null;
     }
     if (typeof value === "object") {
-      return firstTruthy(value.url, value.contentUrl, value.image, value.src);
+      return firstTruthy(
+        normalizeUrl(value.url),
+        normalizeUrl(value.contentUrl),
+        normalizeUrl(value.image),
+        normalizeUrl(value.src),
+      );
     }
     return null;
+  }
+
+  function collectImageUrls(value, out) {
+    if (!value || !out || out.size >= 24) return;
+    if (typeof value === "string") {
+      const next = normalizeUrl(value);
+      if (next) out.add(next);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        collectImageUrls(entry, out);
+        if (out.size >= 24) break;
+      }
+      return;
+    }
+    if (typeof value === "object") {
+      collectImageUrls(value.url, out);
+      collectImageUrls(value.contentUrl, out);
+      collectImageUrls(value.image, out);
+      collectImageUrls(value.src, out);
+    }
   }
 
   function parseJsonLd() {
@@ -151,11 +204,15 @@
     let bestScore = -1;
     for (const product of products) {
       const offers = extractOffer(product.offers);
+      const imageSet = new Set();
+      collectImageUrls(product.image, imageSet);
+      const imageUrls = Array.from(imageSet);
       const candidate = {
         name: firstTruthy(product.name, product.headline),
         description: firstTruthy(product.description),
         brand: typeof product.brand === "object" ? firstTruthy(product.brand?.name, product.brand?.brand) : firstTruthy(product.brand),
         imageUrl: extractImage(product.image),
+        imageUrls,
         price: offers.price,
         currency: offers.currency,
         originalPrice: offers.originalPrice,
@@ -174,6 +231,7 @@
         description: null,
         brand: null,
         imageUrl: null,
+        imageUrls: [],
         price: null,
         currency: null,
         originalPrice: null,
@@ -186,9 +244,15 @@
   function parseOpenGraph() {
     const priceMeta = metaContent("product:price:amount") || metaContent("og:price:amount") || metaContent("price");
     const parsedPrice = parsePriceText(priceMeta);
+    const imageUrls = uniqueUrlList([
+      metaContent("og:image"),
+      metaContent("twitter:image"),
+      metaContent("twitter:image:src"),
+    ]);
     return {
       title: firstTruthy(metaContent("og:title"), metaContent("twitter:title"), document.title),
       imageUrl: firstTruthy(metaContent("og:image"), metaContent("twitter:image"), metaContent("twitter:image:src")),
+      imageUrls,
       description: firstTruthy(metaContent("og:description"), metaContent("description", "name"), metaContent("twitter:description")),
       price: parsedPrice.amount,
       currency: firstTruthy(metaContent("product:price:currency"), metaContent("og:price:currency"), parsedPrice.currency),
@@ -211,6 +275,7 @@
         originalPrice: null,
         discountPercent: null,
         imageUrl: null,
+        imageUrls: [],
         brand: null,
         description: null,
         dimensionsText: null,
@@ -254,6 +319,12 @@
     );
 
     let imageUrl = firstTruthy(attrFromSelector("#landingImage", "src"), attrFromSelector("#imgTagWrapperId img", "src"));
+    const imageCandidates = [
+      attrFromSelector("#landingImage", "src"),
+      attrFromSelector("#imgTagWrapperId img", "src"),
+      attrFromSelector("#landingImage", "data-old-hires"),
+      ...Array.from(document.querySelectorAll("#altImages img")).map((node) => cleanText(node.getAttribute("src") || "")),
+    ];
     const dynamicImageRaw = attrFromSelector("#landingImage", "data-a-dynamic-image");
     if (!imageUrl && dynamicImageRaw) {
       try {
@@ -264,6 +335,15 @@
         // ignore
       }
     }
+    if (dynamicImageRaw) {
+      try {
+        const parsed = JSON.parse(dynamicImageRaw);
+        imageCandidates.push(...Object.keys(parsed || {}));
+      } catch {
+        // ignore
+      }
+    }
+    const imageUrls = uniqueUrlList([imageUrl, ...imageCandidates], 20);
 
     const brand = firstTruthy(textFromSelector("#bylineInfo"), textFromSelector("a#bylineInfo"));
     const bullets = Array.from(document.querySelectorAll("#feature-bullets li span.a-list-item"))
@@ -294,7 +374,8 @@
       currency,
       originalPrice: listPrice.amount,
       discountPercent,
-      imageUrl,
+      imageUrl: imageUrls[0] || null,
+      imageUrls,
       brand,
       description,
       dimensionsText,
@@ -333,11 +414,18 @@
       }
     }
 
-    const imageUrl = firstTruthy(
-      attrFromSelector('meta[property="og:image"]', "content"),
-      attrFromSelector('img[itemprop="image"]', "src"),
-      attrFromSelector("main img", "src"),
+    const imageUrls = uniqueUrlList(
+      [
+        attrFromSelector('meta[property="og:image"]', "content"),
+        attrFromSelector('img[itemprop="image"]', "src"),
+        attrFromSelector("main img", "src"),
+        ...Array.from(document.querySelectorAll("main img, article img, [class*='gallery'] img, [class*='product'] img"))
+          .slice(0, 20)
+          .map((img) => cleanText(img.getAttribute("src") || img.getAttribute("data-src") || "")),
+      ],
+      20,
     );
+    const imageUrl = imageUrls[0] || null;
 
     const specs = [];
     for (const row of document.querySelectorAll("table tr")) {
@@ -368,6 +456,7 @@
       price,
       currency,
       imageUrl,
+      imageUrls,
       description,
       dimensionsText,
       variantText,
@@ -415,7 +504,20 @@
       ld.data.discountPercent,
       originalPrice !== null && price !== null && originalPrice > price ? ((originalPrice - price) / originalPrice) * 100 : null,
     );
-    const imageUrl = firstTruthy(amazon.imageUrl, ld.data.imageUrl, og.imageUrl, generic.imageUrl);
+    const imageUrls = uniqueUrlList(
+      [
+        amazon.imageUrl,
+        ...(amazon.imageUrls || []),
+        ld.data.imageUrl,
+        ...(ld.data.imageUrls || []),
+        og.imageUrl,
+        ...(og.imageUrls || []),
+        generic.imageUrl,
+        ...(generic.imageUrls || []),
+      ],
+      20,
+    );
+    const imageUrl = imageUrls[0] || null;
     const brand = firstTruthy(amazon.brand, ld.data.brand);
     const description = firstTruthy(amazon.description, ld.data.description, og.description, generic.description);
     const dimensionsText = firstTruthy(amazon.dimensionsText, generic.dimensionsText);
@@ -431,6 +533,7 @@
       originalPrice,
       discountPercent,
       imageUrl: imageUrl || null,
+      imageUrls,
       brand: brand || null,
       description: description || null,
       dimensionsText: dimensionsText || null,

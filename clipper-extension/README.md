@@ -1,6 +1,6 @@
 # Furniture Tracker Clipper (MV3)
 
-One-click browser clipper that sends product data to `/api/clip` and opens the item editor.
+One-click browser clipper that captures product data and opens the app to create/edit the item in local app state.
 
 ## Load Unpacked
 
@@ -14,7 +14,7 @@ One-click browser clipper that sends product data to `/api/clip` and opens the i
 Open the extension popup and set:
 
 - **Clipper Token**
-  - Must match `CLIPPER_TOKEN` in your app environment.
+  - Optional legacy setting (not required for local-first capture flow).
 
 Click **Save Settings**.
 
@@ -27,10 +27,10 @@ Notes:
 1. On a product page, click the extension icon.
 2. It captures from rendered page first.
 3. If required fields are missing, it falls back to `/api/scrape/product`.
-4. It posts to `/api/clip`.
-5. It opens `/clip/open/:itemId`, auto-pulls latest data, then lands on `/items/:itemId`.
+4. It opens `/clip/open/new` with the captured payload.
+5. The app creates the item locally and lands on `/items/:itemId`.
 
 If you open popup while on the app tab itself (`/shopping`, `/items`, etc.):
 1. Paste a product URL in popup.
 2. Click **Capture URL**.
-3. It uses scraper fallback and still creates the item + opens edit.
+3. It uses scraper fallback and still creates the local item + opens edit.

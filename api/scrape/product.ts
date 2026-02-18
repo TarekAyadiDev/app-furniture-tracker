@@ -3,6 +3,7 @@ type ParsedProduct = {
   price: number | null;
   description: string | null;
   imageUrl: string | null;
+  imageUrls: string[];
   brand: string | null;
   sourceUrl: string;
   sourceDomain: string;
@@ -265,6 +266,80 @@ function extractImage(value: unknown): string | null {
   return null;
 }
 
+function extractImageUrls(value: unknown, out: Set<string>) {
+  if (!value || out.size >= 30) return;
+  if (typeof value === "string") {
+    const normalized = normalizeUrl(value);
+    if (normalized) out.add(normalized);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      extractImageUrls(entry, out);
+      if (out.size >= 30) break;
+    }
+    return;
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    extractImageUrls(obj.url, out);
+    extractImageUrls(obj.contentUrl, out);
+    extractImageUrls(obj.image, out);
+    extractImageUrls(obj.src, out);
+  }
+}
+
+function uniqueUrls(values: Array<string | null | undefined>, limit = 20): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const normalized = normalizeUrl(value || "");
+    if (!normalized) continue;
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function collectMatchUrls(html: string, regex: RegExp, out: Set<string>) {
+  const nextRegex = new RegExp(regex.source, regex.flags);
+  let match: RegExpExecArray | null = null;
+  while ((match = nextRegex.exec(html)) && out.size < 30) {
+    const raw = decodeHtmlEntities(String(match[1] || ""));
+    const normalized = normalizeUrl(raw);
+    if (normalized) out.add(normalized);
+  }
+}
+
+function extractImageUrlsFromHtmlSignals(html: string): string[] {
+  const out = new Set<string>();
+
+  collectMatchUrls(html, /"hiRes"\s*:\s*"([^"]+)"/gi, out);
+  collectMatchUrls(html, /"large"\s*:\s*"([^"]+)"/gi, out);
+  collectMatchUrls(html, /data-old-hires=["']([^"']+)["']/gi, out);
+
+  const dynamicImageRegex = /data-a-dynamic-image=["']([^"']+)["']/gi;
+  let dynamicMatch: RegExpExecArray | null = null;
+  while ((dynamicMatch = dynamicImageRegex.exec(html)) && out.size < 30) {
+    const raw = decodeHtmlEntities(String(dynamicMatch[1] || ""));
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      for (const key of Object.keys(parsed || {})) {
+        const normalized = normalizeUrl(key);
+        if (normalized) out.add(normalized);
+        if (out.size >= 30) break;
+      }
+    } catch {
+      // ignore malformed dynamic image JSON
+    }
+  }
+
+  return Array.from(out).slice(0, 20);
+}
+
 function extractPriceFromOffers(offers: unknown): number | null {
   if (!offers) return null;
   if (Array.isArray(offers)) {
@@ -489,9 +564,18 @@ function extractProduct(html: string, sourceUrl: string): ParsedProduct | null {
     extractTitleTag(html),
   );
   const description = firstNonEmpty(ld?.description, getMeta(meta, "description", "og:description", "twitter:description"));
-  const imageUrl = normalizeUrl(
-    firstNonEmpty(extractImage(ld?.image), getMeta(meta, "og:image", "twitter:image", "twitter:image:src", "image")),
-  );
+  const ldImageSet = new Set<string>();
+  extractImageUrls(ld?.image, ldImageSet);
+  const imageUrls = uniqueUrls([
+    normalizeUrl(firstNonEmpty(extractImage(ld?.image), getMeta(meta, "og:image", "twitter:image", "twitter:image:src", "image"))),
+    ...Array.from(ldImageSet),
+    getMeta(meta, "og:image"),
+    getMeta(meta, "twitter:image"),
+    getMeta(meta, "twitter:image:src"),
+    getMeta(meta, "image"),
+    ...extractImageUrlsFromHtmlSignals(html),
+  ]);
+  const imageUrl = imageUrls[0] || null;
   const brand = firstNonEmpty(extractBrand(ld?.brand), getMeta(meta, "product:brand", "brand", "og:brand"));
   const price = 
     parsePrice(getMeta(meta, "product:price:amount", "og:price:amount", "price", "itemprop:price")) ??
@@ -532,6 +616,7 @@ function extractProduct(html: string, sourceUrl: string): ParsedProduct | null {
     price,
     description: description || null,
     imageUrl: imageUrl || null,
+    imageUrls,
     brand: brand || null,
     sourceUrl,
     sourceDomain: sourceDomainFromUrl(sourceUrl),
@@ -640,6 +725,7 @@ export default async function handler(req: any, res: any) {
         price: null,
         description: null,
         imageUrl: inputUrl,
+        imageUrls: [inputUrl],
         brand: null,
         sourceUrl: inputUrl,
         sourceDomain: sourceDomainFromUrl(inputUrl),

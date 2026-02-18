@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useData } from "@/data/DataContext";
+import { collectCaptureImageUrls, importCaptureImages } from "@/lib/captureImages";
 import { inferItemKind, type RoomId } from "@/lib/domain";
 import { formatMoneyUSD, parseNumberOrNull } from "@/lib/format";
 import { useToast } from "@/hooks/use-toast";
@@ -21,6 +22,7 @@ type ExtractResponse = {
     price?: number | null;
     description?: string | null;
     imageUrl?: string | null;
+    imageUrls?: string[] | null;
     brand?: string | null;
     sourceUrl?: string | null;
     sourceDomain?: string | null;
@@ -88,7 +90,7 @@ function sourceDomainFromUrl(value: string): string {
 export default function Shopping() {
   const nav = useNavigate();
   const { toast } = useToast();
-  const { orderedRooms, roomNameById, items, createItem, reorderItems } = useData();
+  const { orderedRooms, roomNameById, items, createItem, reorderItems, convertItemToOption } = useData();
 
   const orderedRoomIds = useMemo(() => orderedRooms.map((r) => r.id), [orderedRooms]);
   const validRoomIds = useMemo(() => new Set(orderedRoomIds), [orderedRoomIds]);
@@ -100,10 +102,12 @@ export default function Shopping() {
 
   const [captureName, setCaptureName] = useState("");
   const [captureRoom, setCaptureRoom] = useState<RoomId>(() => loadRecents(RECENT_ROOMS_KEY)[0] || "Living");
+  const [capturePlaceholderId, setCapturePlaceholderId] = useState("");
   const [capturePrice, setCapturePrice] = useState("");
   const [captureBrand, setCaptureBrand] = useState("");
   const [captureDescription, setCaptureDescription] = useState("");
   const [captureImageUrl, setCaptureImageUrl] = useState("");
+  const [captureImageUrls, setCaptureImageUrls] = useState<string[]>([]);
   const [captureCurrency, setCaptureCurrency] = useState("");
   const [captureOriginalPrice, setCaptureOriginalPrice] = useState("");
   const [captureDiscountPercent, setCaptureDiscountPercent] = useState("");
@@ -132,6 +136,23 @@ export default function Shopping() {
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 8);
   }, [items]);
+
+  const placeholderItems = useMemo(() => {
+    return items
+      .filter((it) => it.syncState !== "deleted")
+      .filter((it) => inferItemKind(it) === "placeholder")
+      .sort((a, b) => {
+        const ra = roomNameById.get(a.room) || a.room;
+        const rb = roomNameById.get(b.room) || b.room;
+        if (ra !== rb) return ra.localeCompare(rb);
+        return a.name.localeCompare(b.name);
+      });
+  }, [items, roomNameById]);
+
+  const roomPlaceholderOptions = useMemo(
+    () => placeholderItems.filter((it) => it.room === captureRoom),
+    [placeholderItems, captureRoom],
+  );
 
   function rememberRoom(room: RoomId) {
     pushRecent(RECENT_ROOMS_KEY, room);
@@ -202,6 +223,10 @@ export default function Shopping() {
       const extractedBrand = normalizeText(json.data.brand);
       const extractedDescription = normalizeText(json.data.description);
       const extractedImage = normalizeText(json.data.imageUrl);
+      const extractedImages = collectCaptureImageUrls({
+        imageUrl: extractedImage,
+        imageUrls: Array.isArray(json.data.imageUrls) ? json.data.imageUrls : [],
+      });
       const extractedCurrency = normalizeText(json.data.currency);
       const extractedOriginalPrice =
         typeof json.data.originalPrice === "number" && Number.isFinite(json.data.originalPrice) ? json.data.originalPrice : null;
@@ -215,6 +240,7 @@ export default function Shopping() {
       setCaptureBrand(extractedBrand);
       setCaptureDescription(extractedDescription);
       setCaptureImageUrl(extractedImage);
+      setCaptureImageUrls(extractedImages);
       setCaptureCurrency(extractedCurrency);
       setCaptureOriginalPrice(extractedOriginalPrice === null ? "" : String(extractedOriginalPrice));
       setCaptureDiscountPercent(extractedDiscount === null ? "" : String(extractedDiscount));
@@ -232,6 +258,7 @@ export default function Shopping() {
     } catch (err: any) {
       if (!captureName.trim()) setCaptureName("New Item");
       setProductUrl(target);
+      setCaptureImageUrls([]);
       toast({
         variant: "destructive",
         title: "Extraction failed",
@@ -247,10 +274,12 @@ export default function Shopping() {
 
     const trimmedUrl = productUrl.trim() || null;
     const sourceDomain = normalizeText(captureSourceDomain) || sourceDomainFromUrl(trimmedUrl || "");
+    const selectedPlaceholder = capturePlaceholderId ? placeholderItems.find((p) => p.id === capturePlaceholderId) || null : null;
+    const destinationRoom = (selectedPlaceholder?.room || captureRoom) as RoomId;
 
     const id = await createStandaloneFromDraft({
       name: trimmedName,
-      room: captureRoom,
+      room: destinationRoom,
       price: parseNumberOrNull(capturePrice),
       description: captureDescription.trim() || null,
       link: trimmedUrl,
@@ -266,20 +295,43 @@ export default function Shopping() {
       captureMethod: captureMethod,
     });
 
-    // Keep URL captures at the top of the room list for quick drag/reorder to placeholders.
-    const roomItemIds = items
-      .filter((it) => it.syncState !== "deleted" && it.room === captureRoom)
-      .map((it) => it.id);
-    await reorderItems(captureRoom, [id, ...roomItemIds]);
+    const imageImport = await importCaptureImages({
+      parentType: "item",
+      parentId: id,
+      imageUrls: collectCaptureImageUrls({
+        imageUrl: captureImageUrl.trim() || null,
+        imageUrls: captureImageUrls,
+      }),
+      limit: 6,
+    }).catch(() => ({
+      attempted: 0,
+      added: 0,
+      linked: 0,
+      uploaded: 0,
+      skipped: 0,
+      failed: 0,
+    }));
 
-    rememberRoom(captureRoom);
+    if (selectedPlaceholder) {
+      await convertItemToOption(selectedPlaceholder.id, id);
+    } else {
+      // Keep URL captures at the top of the room list for quick drag/reorder to placeholders.
+      const roomItemIds = items
+        .filter((it) => it.syncState !== "deleted" && it.room === destinationRoom)
+        .map((it) => it.id);
+      await reorderItems(destinationRoom, [id, ...roomItemIds]);
+    }
+
+    rememberRoom(destinationRoom);
 
     setProductUrl("");
+    setCapturePlaceholderId("");
     setCaptureName("");
     setCapturePrice("");
     setCaptureBrand("");
     setCaptureDescription("");
     setCaptureImageUrl("");
+    setCaptureImageUrls([]);
     setCaptureCurrency("");
     setCaptureOriginalPrice("");
     setCaptureDiscountPercent("");
@@ -289,11 +341,13 @@ export default function Shopping() {
     setCaptureSpecs([]);
     setCaptureMethod("manual");
     toast({
-      title: "Item added",
-      description: `${trimmedName} · ${roomNameById.get(captureRoom) || captureRoom}`,
+      title: selectedPlaceholder ? "Added to placeholder" : "Item added",
+      description: selectedPlaceholder
+        ? `${trimmedName} → ${selectedPlaceholder.name}${imageImport.added ? ` · ${imageImport.added} photo${imageImport.added === 1 ? "" : "s"} attached` : ""}`
+        : `${trimmedName} · ${roomNameById.get(destinationRoom) || destinationRoom}${imageImport.added ? ` · ${imageImport.added} photo${imageImport.added === 1 ? "" : "s"} attached` : ""}`,
     });
 
-    if (openAfter) nav(`/items/${id}`);
+    if (openAfter) nav(`/items/${selectedPlaceholder ? selectedPlaceholder.id : id}`);
   }
 
   async function onQuickAdd() {
@@ -395,7 +449,7 @@ export default function Shopping() {
         <div className="space-y-4">
           <div>
             <h2 className="font-heading text-lg font-semibold text-foreground">Capture From URL</h2>
-            <p className="text-xs text-muted-foreground">Paste URL, choose room, then add.</p>
+            <p className="text-xs text-muted-foreground">Paste URL, assign placeholder (optional), then add.</p>
           </div>
 
           <div className="space-y-2">
@@ -424,11 +478,38 @@ export default function Shopping() {
           </div>
 
           <div className="space-y-1.5">
+            <label htmlFor="capture_placeholder" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Assign to placeholder (optional)
+            </label>
+            <select
+              id="capture_placeholder"
+              value={capturePlaceholderId}
+              onChange={(e) => setCapturePlaceholderId(e.target.value)}
+              className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            >
+              <option value="">(none) Add as room item</option>
+              {roomPlaceholderOptions.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <div className="text-xs text-muted-foreground">
+              {roomPlaceholderOptions.length
+                ? "If selected, the new item is added as a variation under that placeholder."
+                : "No placeholders in this room yet."}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
             <label htmlFor="capture_room" className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Room</label>
             <select
               id="capture_room"
               value={captureRoom}
-              onChange={(e) => setCaptureRoom(e.target.value as RoomId)}
+              onChange={(e) => {
+                setCaptureRoom(e.target.value as RoomId);
+                setCapturePlaceholderId("");
+              }}
               className="h-12 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             >
               {orderedRoomIds.map((r) => (
